@@ -11,7 +11,7 @@ router = APIRouter(prefix="/tags", tags=["tags"])
 
 @router.get("/", response_model=List[TagOut])
 def list_tags(db: Session = Depends(get_db)):
-    return db.execute(select(Tag)).scalars().all()
+    return db.execute(select(Tag).order_by(Tag.name)).scalars().all()
 
 @router.post("/", response_model=TagOut, status_code=status.HTTP_201_CREATED)
 def create_tag(tag_in: TagCreate, db: Session = Depends(get_db)):
@@ -19,10 +19,10 @@ def create_tag(tag_in: TagCreate, db: Session = Depends(get_db)):
     existing_tag = db.execute(
         select(Tag).where(Tag.name == tag_in.name)
     ).scalar_one_or_none()
-    
+
     if existing_tag:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, 
+            status_code=status.HTTP_409_CONFLICT,
             detail="Tag with this name already exists"
         )
 
