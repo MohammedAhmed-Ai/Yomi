@@ -76,3 +76,32 @@ class DayOut(BaseModel):
     tasks: List[TaskOut] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+class DayUpdate(BaseModel):
+    """A day stays editable when locked; the lock only freezes its tasks."""
+    model_config = ConfigDict(extra="forbid")
+
+    reflection: Optional[str] = Field(None, max_length=10000)
+    mood: Optional[int] = Field(None, ge=1, le=10)
+    locked: Optional[bool] = None
+
+class DayScore(BaseModel):
+    """
+    Daily score. Yomi is all-or-nothing: `score` is the day's full point value
+    only when every planned top-level task was completed *on that day*, otherwise 0.
+
+    Subtasks are excluded from the totals because they decompose a parent task
+    rather than adding work of their own, but they are reported separately.
+    """
+    date: date
+    is_empty: bool
+    is_complete: bool
+    tasks_total: int
+    tasks_done: int
+    subtasks_total: int
+    subtasks_done: int
+    total_points: int
+    earned_points: int
+    score: int
+
+    model_config = ConfigDict(from_attributes=True)

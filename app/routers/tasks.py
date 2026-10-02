@@ -7,10 +7,22 @@ from zoneinfo import ZoneInfo
 from typing import List, Optional
 
 from app.db import get_db
-from app.models import Task, utcnow
+from app.models import Day, Task, utcnow
 from app.schemas import TaskCreate, TaskUpdate, TaskOut
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+
+def assert_day_unlocked(db: Session, task: Task) -> None:
+    """A locked day is frozen: its tasks can no longer be changed."""
+    if not task.planned_date:
+        return
+    day = db.get(Day, task.planned_date)
+    if day and day.locked:
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail=f"Day {task.planned_date.isoformat()} is locked",
+        )
 
 
 def get_task_or_404(db: Session, task_id: int) -> Task:
@@ -47,6 +59,14 @@ def create_task(task_in: TaskCreate, db: Session = Depends(get_db)):
         if not task_in.planned_date:
             task_in.planned_date = parent.planned_date
 
+    if task_in.planned_date:
+        day = db.get(Day, task_in.planned_date)
+        if day and day.locked:
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail=f"Day {task_in.planned_date.isoformat()} is locked",
+            )
+
     task_data = task_in.model_dump()
     # Lifecycle fields are server-owned
     task_data["status"] = "pending"
@@ -63,6 +83,7 @@ def create_task(task_in: TaskCreate, db: Session = Depends(get_db)):
 @router.post("/{task_id}/complete", response_model=TaskOut)
 def complete_task(task_id: int, db: Session = Depends(get_db)):
     db_task = get_task_or_404(db, task_id)
+    assert_day_unlocked(db, db_task)
 
     # Completing an already-done task is a no-op: keep the original completion stamps
     if db_task.status != "done":
@@ -79,6 +100,7 @@ def complete_task(task_id: int, db: Session = Depends(get_db)):
 @router.post("/{task_id}/uncomplete", response_model=TaskOut)
 def uncomplete_task(task_id: int, db: Session = Depends(get_db)):
     db_task = get_task_or_404(db, task_id)
+    assert_day_unlocked(db, db_task)
 
     if db_task.status == "done":
         db_task.status = "pending"
@@ -93,6 +115,7 @@ def uncomplete_task(task_id: int, db: Session = Depends(get_db)):
 @router.patch("/{task_id}", response_model=TaskOut)
 def update_task(task_id: int, task_in: TaskUpdate, db: Session = Depends(get_db)):
     db_task = get_task_or_404(db, task_id)
+    assert_day_unlocked(db, db_task)
 
     update_data = task_in.model_dump(exclude_unset=True)
 
@@ -107,6 +130,7 @@ def update_task(task_id: int, task_in: TaskUpdate, db: Session = Depends(get_db)
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_task(task_id: int, db: Session = Depends(get_db)):
     db_task = get_task_or_404(db, task_id)
+    assert_day_unlocked(db, db_task)
 
     # Soft delete: status="deleted" and deleted_at set, cascaded to subtasks
     now = utcnow()
