@@ -1,6 +1,5 @@
-import pytest
 from fastapi import status
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from freezegun import freeze_time
 from app.models import Task
 
@@ -86,20 +85,34 @@ def test_complete_task(client):
     assert data["completed_date"] is not None
 
 def test_complete_task_twice_noop(client):
-    """Verify completing a task twice is a no-op."""
+    """Verify completing a task twice keeps the original completion stamps."""
     res = client.post("/api/tasks/", json={"title": "Double Complete"})
     task_id = res.json()["id"]
-    
+
     # First time
     first_res = client.post(f"/api/tasks/{task_id}/complete")
     first_date = first_res.json()["completed_date"]
-    
+    first_at = first_res.json()["completed_at"]
+
     # Second time
     second_res = client.post(f"/api/tasks/{task_id}/complete")
     second_date = second_res.json()["completed_date"]
-    
+
     assert first_date == second_date
+    assert second_res.json()["completed_at"] == first_at
     assert second_res.status_code == status.HTTP_200_OK
+
+
+def test_uncomplete_twice_noop(client):
+    res = client.post("/api/tasks/", json={"title": "Double Uncomplete"}).json()
+    client.post(f"/api/tasks/{res['id']}/complete")
+
+    client.post(f"/api/tasks/{res['id']}/uncomplete")
+    second = client.post(f"/api/tasks/{res['id']}/uncomplete").json()
+
+    assert second["status"] == "pending"
+    assert second["completed_at"] is None
+    assert second["completed_date"] is None
 
 def test_uncomplete_task(client):
     # Create and complete
@@ -138,19 +151,32 @@ def test_update_task_title_points(client):
 
 @freeze_time("2026-10-01 22:30:00")
 def test_completed_date_cairo(client):
-    """Verify completed_date uses the Cairo date (e.g. 22:30 UTC is next day in Cairo)."""
-    # Cairo is UTC+2. 22:30 UTC on Oct 1st is 00:30 UTC+2 on Oct 2nd.
+    """Verify completed_date uses the Cairo date (22:30 UTC is already the next day in Cairo)."""
+    # Cairo is UTC+2 (EEST in October). 22:30 UTC on Oct 1st is 00:30 on Oct 2nd.
     res = client.post("/api/tasks/", json={"title": "Cairo Test"})
     task_id = res.json()["id"]
-    
-    client.post(f"/api/tasks/{task_id}/complete")
-    
-    # Fetch the task
-    res_final = client.post(f"/api/tasks/{task_id}/complete")
-    data = res_final.json()
-    
-    # Should be 2026-10-02
-    assert data["completed_date"] == date(2026, 10, 2)
+
+    data = client.post(f"/api/tasks/{task_id}/complete").json()
+
+    assert data["completed_date"] == date(2026, 10, 2).isoformat()
+    assert data["completed_at"].startswith("2026-10-01T22:30:00")
+
+
+@freeze_time("2026-10-01 22:30:00")
+def test_completed_date_respects_timezone_env(client, monkeypatch):
+    """Same instant, different TIMEZONE -> different calendar day."""
+    res = client.post("/api/tasks/", json={"title": "TZ Test"}).json()
+    task_id = res["id"]
+
+    monkeypatch.setenv("TIMEZONE", "Africa/Cairo")
+    cairo = client.post(f"/api/tasks/{task_id}/complete").json()
+
+    monkeypatch.setenv("TIMEZONE", "UTC")
+    utc = client.post(f"/api/tasks/{task_id}/uncomplete").json()
+    utc = client.post(f"/api/tasks/{task_id}/complete").json()
+
+    assert cairo["completed_date"] == "2026-10-02"
+    assert utc["completed_date"] == "2026-10-01"
 
 def test_delete_task_soft(client):
     res = client.post("/api/tasks/", json={"title": "Delete Me"})
@@ -163,30 +189,65 @@ def test_delete_task_soft(client):
     # For now, we can verify via the client if there's a get_task (though not in the provided router snippet).
     # We rely on the implementation logic provided in the router.
 
-def test_soft_delete_propagation(client):
+def test_soft_delete_propagation(client, db_session):
     """Verify soft delete hides task and subtasks from day, but rows stay in DB."""
     # Create parent and subtask
     parent = client.post("/api/tasks/", json={"title": "Parent"}).json()
     sub = client.post("/api/tasks/", json={"title": "Sub", "parent_task_id": parent["id"]}).json()
     test_date = date.today().isoformat()
-    
+
     # Soft delete parent
     client.delete(f"/api/tasks/{parent['id']}")
-    
+
     # Get day - neither should appear
     response = client.get(f"/api/days/{test_date}")
     tasks = response.json()["tasks"]
     assert not any(t["id"] == parent["id"] for t in tasks)
     assert not any(t["id"] == sub["id"] for t in tasks)
-    
-    # Verify rows still exist in DB
-    from app.db import SessionLocal
-    with SessionLocal() as db:
-        from app.models import Task
-        parent_row = db.get(Task, parent["id"])
-        assert parent_row is not None
-        assert parent_row.status == "deleted"
-        assert parent_row.deleted_at is not None
+
+    # Verify rows still exist in DB, both flagged as deleted
+    for task_id in (parent["id"], sub["id"]):
+        row = db_session.get(Task, task_id)
+        assert row is not None
+        assert row.status == "deleted"
+        assert row.deleted_at is not None
+
+
+def test_subtask_delete_does_not_touch_parent(client, db_session):
+    parent = client.post("/api/tasks/", json={"title": "Parent"}).json()
+    sub = client.post("/api/tasks/", json={"title": "Sub", "parent_task_id": parent["id"]}).json()
+
+    client.delete(f"/api/tasks/{sub['id']}")
+
+    assert db_session.get(Task, sub["id"]).status == "deleted"
+    assert db_session.get(Task, parent["id"]).status == "pending"
+
+
+def test_create_task_rejects_client_lifecycle_fields(client, db_session):
+    """Status is server-owned: a client cannot create an already-done task."""
+    res = client.post(
+        "/api/tasks/",
+        json={"title": "Sneaky", "status": "done", "completed_date": "2026-01-01"},
+    )
+    assert res.status_code == 422
+    assert db_session.query(Task).count() == 0
+
+
+def test_patch_cannot_change_status(client):
+    res = client.post("/api/tasks/", json={"title": "Patch Me"}).json()
+    response = client.patch(f"/api/tasks/{res['id']}", json={"status": "done"})
+    assert response.status_code == 422
+
+
+def test_list_tasks_sorted_and_excludes_deleted(client):
+    test_date = (date.today() + timedelta(days=6)).isoformat()
+    b = client.post("/api/tasks/", json={"title": "B", "planned_date": test_date, "sort_order": 2}).json()
+    a = client.post("/api/tasks/", json={"title": "A", "planned_date": test_date, "sort_order": 1}).json()
+    gone = client.post("/api/tasks/", json={"title": "Gone", "planned_date": test_date}).json()
+    client.delete(f"/api/tasks/{gone['id']}")
+
+    ids = [t["id"] for t in client.get(f"/api/tasks/?planned_date={test_date}").json()]
+    assert ids == [a["id"], b["id"]]
 
 def test_edit_deleted_or_unknown_task(client):
     """Verify editing, completing or deleting a deleted or unknown task returns 404."""
@@ -208,7 +269,7 @@ def test_edit_deleted_or_unknown_task(client):
     assert res_del.status_code == 404
     
     # Unknown
-    res_unk = client.patch(f"/api/tasks/99999", json={"title": "New"})
+    res_unk = client.patch("/api/tasks/99999", json={"title": "New"})
     assert res_unk.status_code == 404
 
 def test_create_task_validation_errors(client):

@@ -1,7 +1,5 @@
-import pytest
 from fastapi import status
 from datetime import date, timedelta
-from app.db import SessionLocal
 from app.models import Day
 
 def test_get_day_success(client):
@@ -73,19 +71,50 @@ def test_get_day_subtask_nesting(client):
     assert subtask["parent_task_id"] == parent_id
     assert subtask["planned_date"] == test_date
 
-def test_days_table_behavior(client):
+def test_days_table_behavior(client, db_session):
     """Verify that creating/completing tasks doesn't create Day row, but GET /days does."""
     # 1. Create task
-    client.post("/api/tasks/", json={"title": "Table Test"})
-    
-    with SessionLocal() as db:
-        # Day table should be empty
-        assert db.query(Day).count() == 0
-    
+    task = client.post("/api/tasks/", json={"title": "Table Test"}).json()
+    client.post(f"/api/tasks/{task['id']}/complete")
+
+    # Day table should still be empty
+    assert db_session.query(Day).count() == 0
+
     # 2. Get day
     test_date = date.today().isoformat()
     client.get(f"/api/days/{test_date}")
-    
-    with SessionLocal() as db:
-        # Day table should now have 1 row
-        assert db.query(Day).count() == 1
+
+    # Day table should now have 1 row
+    assert db_session.query(Day).count() == 1
+
+
+def test_get_day_nests_subtasks(client):
+    """Verify each task carries its subtasks tree while the day list stays flat."""
+    test_date = (date.today() + timedelta(days=4)).isoformat()
+
+    parent = client.post("/api/tasks/", json={"title": "Parent", "planned_date": test_date}).json()
+    sub = client.post("/api/tasks/", json={"title": "Sub", "parent_task_id": parent["id"]}).json()
+
+    tasks = client.get(f"/api/days/{test_date}").json()["tasks"]
+
+    # Flat list includes both parent and subtask
+    assert any(t["id"] == parent["id"] for t in tasks)
+    assert any(t["id"] == sub["id"] for t in tasks)
+
+    # ...and the parent also nests its subtask
+    parent_body = next(t for t in tasks if t["id"] == parent["id"])
+    assert [s["id"] for s in parent_body["subtasks"]] == [sub["id"]]
+
+
+def test_deleted_subtask_disappears_from_tree(client):
+    """A soft-deleted subtask is hidden from both the flat list and the tree."""
+    test_date = (date.today() + timedelta(days=5)).isoformat()
+
+    parent = client.post("/api/tasks/", json={"title": "Parent", "planned_date": test_date}).json()
+    sub = client.post("/api/tasks/", json={"title": "Sub", "parent_task_id": parent["id"]}).json()
+    client.delete(f"/api/tasks/{sub['id']}")
+
+    tasks = client.get(f"/api/days/{test_date}").json()["tasks"]
+    assert not any(t["id"] == sub["id"] for t in tasks)
+    parent_body = next(t for t in tasks if t["id"] == parent["id"])
+    assert parent_body["subtasks"] == []

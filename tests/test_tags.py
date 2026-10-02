@@ -1,6 +1,4 @@
-import pytest
 from fastapi import status
-from app.schemas import TagCreate
 
 def test_list_tags_empty(client):
     """Verify that listing tags returns an empty list when no tags exist."""
