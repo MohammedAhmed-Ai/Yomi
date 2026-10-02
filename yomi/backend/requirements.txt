@@ -6,3 +6,4 @@ pydantic>=2
 pytest
 httpx
 tzdata
+freezegun
