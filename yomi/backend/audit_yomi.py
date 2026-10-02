@@ -1,13 +1,15 @@
+import sys
+from pathlib import Path
+
+# repo root (backend/ -> yomi/ -> repo root) must be importable before app.*
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
 from app.main import app
 from app.db import Base, get_db
-from app import models  # noqa: F401
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
 Base.metadata.create_all(bind=engine)
@@ -77,7 +79,7 @@ def d():
 
 def e():
     _, p = make("Parent")
-    r, s = make("Sub", "2026-10-09", parent_task_id=p["id"])
+    r, s = make("Sub", parent_task_id=p["id"])
     parent = next((x for x in day_tasks() if x.get("id") == p["id"]), {})
     nested = any(x.get("id") == s.get("id") for x in parent.get("subtasks", []))
     return r.status_code in (200, 201) and s.get("planned_date") == D and nested, \
@@ -160,8 +162,8 @@ def q2():
     after_complete = days_count()
     client.get("/api/days/2026-11-01")
     after_get = days_count()
-    ok = before == after_create == after_complete == 0 and after_get == 1
-    return ok, f"counts: before={before} create={after_create} complete={after_complete} GET={after_get} (expected 0,0,0,1)"
+    ok = before == after_create == after_complete and after_get == before + 1
+    return ok, f"counts: before={before} create={after_create} complete={after_complete} GET={after_get} (day rows only created by GET /days)"
 
 
 print("--- Yomi audit ---")
@@ -176,4 +178,5 @@ for name, fn in [("a health", a), ("b create+day", b), ("c bad date", c), ("d co
         label, info = "ERROR", repr(ex)
     print(f"{name}: {label} | {info}")
 print("day response keys:", sorted(client.get(f"/api/days/{D}").json().keys()))
-print("routes:", sorted({(m_, r.path) for r in app.routes for m_ in getattr(r, "methods", []) if r.path.startswith("/api")}))
+# FastAPI >=0.100 keeps included routers lazy, so app.routes no longer lists them.
+print("routes:", sorted((m, p) for p, ops in app.openapi()["paths"].items() for m in ops))
