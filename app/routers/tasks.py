@@ -2,13 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import select
 from datetime import date
-import os
-from zoneinfo import ZoneInfo
 from typing import List, Optional
 
 from app.db import get_db
 from app.models import Day, Task, utcnow
 from app.schemas import TaskCreate, TaskUpdate, TaskOut
+from app.time_utils import local_date
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -33,13 +32,22 @@ def get_task_or_404(db: Session, task_id: int) -> Task:
     return task
 
 
-def local_date(now) -> date:
-    """Today in the configured timezone (TIMEZONE, default Africa/Cairo)."""
-    tz_name = os.getenv("TIMEZONE", "Africa/Cairo")
-    try:
-        return now.astimezone(ZoneInfo(tz_name)).date()
-    except Exception:
-        return now.date()
+def get_writable_task(db: Session, task_id: int) -> Task:
+    """Fetch a task that may be modified.
+
+    A missed task is a historical record of what was not done: it stays on its own
+    day and is read-only, so the work continues on the copy carried over instead.
+    """
+    task = get_task_or_404(db, task_id)
+    if task.status == "missed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Task {task_id} was missed and is read-only. "
+                "Work on the copy that was carried over instead."
+            ),
+        )
+    return task
 
 
 @router.post("/", response_model=TaskOut, status_code=status.HTTP_201_CREATED)
@@ -82,7 +90,7 @@ def create_task(task_in: TaskCreate, db: Session = Depends(get_db)):
 
 @router.post("/{task_id}/complete", response_model=TaskOut)
 def complete_task(task_id: int, db: Session = Depends(get_db)):
-    db_task = get_task_or_404(db, task_id)
+    db_task = get_writable_task(db, task_id)
     assert_day_unlocked(db, db_task)
 
     # Completing an already-done task is a no-op: keep the original completion stamps
@@ -99,7 +107,7 @@ def complete_task(task_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{task_id}/uncomplete", response_model=TaskOut)
 def uncomplete_task(task_id: int, db: Session = Depends(get_db)):
-    db_task = get_task_or_404(db, task_id)
+    db_task = get_writable_task(db, task_id)
     assert_day_unlocked(db, db_task)
 
     if db_task.status == "done":
@@ -114,7 +122,7 @@ def uncomplete_task(task_id: int, db: Session = Depends(get_db)):
 
 @router.patch("/{task_id}", response_model=TaskOut)
 def update_task(task_id: int, task_in: TaskUpdate, db: Session = Depends(get_db)):
-    db_task = get_task_or_404(db, task_id)
+    db_task = get_writable_task(db, task_id)
     assert_day_unlocked(db, db_task)
 
     update_data = task_in.model_dump(exclude_unset=True)
@@ -129,7 +137,7 @@ def update_task(task_id: int, task_in: TaskUpdate, db: Session = Depends(get_db)
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_task(task_id: int, db: Session = Depends(get_db)):
-    db_task = get_task_or_404(db, task_id)
+    db_task = get_writable_task(db, task_id)
     assert_day_unlocked(db, db_task)
 
     # Soft delete: status="deleted" and deleted_at set, cascaded to subtasks

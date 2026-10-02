@@ -20,10 +20,11 @@ class Task(Base):
     priority = Column(Integer, default=0)  # 0-3
     planned_date = Column(Date)
     original_date = Column(Date)
-    status = Column(String, default="pending")  # "pending"|"done"|"deleted"
+    status = Column(String, default="pending")  # "pending"|"done"|"missed"|"deleted"
     completed_at = Column(DateTime, nullable=True)
     completed_date = Column(Date, nullable=True)
     carry_count = Column(Integer, default=0)
+    carried_from_id = Column(Integer, ForeignKey("tasks.id"), nullable=True, index=True)
     miss_reason = Column(String, nullable=True)
     parent_task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True, index=True)
     recurrence_rule = Column(String, nullable=True)

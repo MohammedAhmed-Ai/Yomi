@@ -48,6 +48,7 @@ class TaskOut(TaskBase):
     completed_at: Optional[datetime] = None
     completed_date: Optional[date] = None
     carry_count: int
+    carried_from_id: Optional[int] = None
     created_at: datetime
     deleted_at: Optional[datetime] = None
     tags: List[TagOut] = []
@@ -64,6 +65,17 @@ class TaskOut(TaskBase):
         return value
 
 TaskOut.model_rebuild()
+
+# --- Carry-over ---
+
+class CarryOverResult(BaseModel):
+    """What one carry-over run moved onto today."""
+    date: date
+    tasks_carried: int
+    subtasks_carried: int
+    total_carried: int
+
+    model_config = ConfigDict(from_attributes=True)
 
 # --- Days ---
 
