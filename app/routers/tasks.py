@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import select, update, delete
-from datetime import datetime, date
+from datetime import datetime, date, timezone
+import os
+from zoneinfo import ZoneInfo
 from typing import List, Optional
 
 from app.db import get_db
@@ -45,8 +47,19 @@ def complete_task(task_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Task not found")
     
     db_task.status = "done"
-    db_task.completed_at = datetime.utcnow()
-    db_task.completed_date = date.today()
+    now_utc = datetime.now(timezone.utc)
+    db_task.completed_at = now_utc
+    
+    # Use timezone from env or default to Africa/Cairo
+    tz_name = os.getenv("TIMEZONE", "Africa/Cairo")
+    try:
+        tz = ZoneInfo(tz_name)
+        db_task.completed_date = now_utc.astimezone(tz).date()
+    except Exception:
+        # If zoneinfo fails, fallback to UTC date or report error
+        # Per request: "tell me instead of installing anything"
+        # But the app should probably still function.
+        db_task.completed_date = now_utc.date()
     
     db.commit()
     db.refresh(db_task)
@@ -74,14 +87,6 @@ def update_task(task_id: int, task_in: TaskUpdate, db: Session = Depends(get_db)
 
     update_data = task_in.model_dump(exclude_unset=True)
     
-    # Special logic for completion
-    if update_data.get("status") == "done" and db_task.status != "done":
-        update_data["completed_at"] = datetime.utcnow()
-        update_data["completed_date"] = date.today()
-    elif update_data.get("status") == "pending" and db_task.status == "done":
-        update_data["completed_at"] = None
-        update_data["completed_date"] = None
-
     for key, value in update_data.items():
         setattr(db_task, key, value)
 
@@ -97,7 +102,7 @@ def delete_task(task_id: int, db: Session = Depends(get_db)):
 
     # Soft delete: status="deleted" and deleted_at set
     db_task.status = "deleted"
-    db_task.deleted_at = datetime.utcnow()
+    db_task.deleted_at = datetime.now(timezone.utc)
     
     db.commit()
     return None

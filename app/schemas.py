@@ -37,9 +37,6 @@ class TaskUpdate(BaseModel):
     notes: Optional[str] = None
     points: Optional[int] = Field(None, ge=0, le=1000)
     priority: Optional[int] = Field(None, ge=0, le=3)
-    status: Optional[str] = None
-    completed_at: Optional[datetime] = None
-    completed_date: Optional[date] = None
     miss_reason: Optional[str] = None
     sort_order: Optional[int] = None
 
