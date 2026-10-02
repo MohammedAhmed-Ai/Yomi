@@ -1,9 +1,13 @@
 from sqlalchemy import Column, Integer, String, Date, DateTime, Boolean, ForeignKey, Text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship
-from datetime import datetime, date
+from sqlalchemy.orm import declarative_base, relationship
+from datetime import datetime, timezone
 
 Base = declarative_base()
+
+
+def utcnow() -> datetime:
+    """Single source of truth for 'now' so every stored timestamp is tz-aware UTC."""
+    return datetime.now(timezone.utc)
 
 
 class Task(Base):
@@ -21,11 +25,30 @@ class Task(Base):
     completed_date = Column(Date, nullable=True)
     carry_count = Column(Integer, default=0)
     miss_reason = Column(String, nullable=True)
-    parent_task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True)
+    parent_task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True, index=True)
     recurrence_rule = Column(String, nullable=True)
     sort_order = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     deleted_at = Column(DateTime, nullable=True)
+
+    parent = relationship(
+        "Task",
+        remote_side="Task.id",
+        back_populates="subtasks",
+        foreign_keys="Task.parent_task_id",
+    )
+    subtasks = relationship(
+        "Task",
+        back_populates="parent",
+        foreign_keys="Task.parent_task_id",
+        order_by="(Task.sort_order, Task.id)",
+        lazy="selectin",
+    )
+    tags = relationship("Tag", secondary="task_tags", lazy="selectin")
+
+    @property
+    def is_deleted(self) -> bool:
+        return self.status == "deleted"
 
 
 class Day(Base):
