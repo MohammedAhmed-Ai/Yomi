@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+*.db
+.venv/
+venv/
+node_modules/
+dist/
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
