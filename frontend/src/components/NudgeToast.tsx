@@ -3,9 +3,8 @@ import type { AnimationEvent, ReactElement } from 'react';
 
 export interface NudgeMessage {
   title: string;
-  stats: string;
   detail: string;
-  motivation: string;
+  motivation?: string;
 }
 
 interface NudgeToastProps {
@@ -80,7 +79,6 @@ export function NudgeToast({ message, onDismiss }: NudgeToastProps): ReactElemen
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="m-0 text-sm font-semibold">{message.title}</p>
-              <p className="mt-1 mb-0 text-xs font-medium text-primary">{message.stats}</p>
             </div>
             <button
               type="button"
@@ -95,8 +93,10 @@ export function NudgeToast({ message, onDismiss }: NudgeToastProps): ReactElemen
               </svg>
             </button>
           </div>
-          <p className="mt-2 mb-0 text-sm">{message.detail}</p>
-          <p className="mt-1 mb-0 text-xs text-muted">{message.motivation}</p>
+          <p className="mt-1 mb-0 text-sm">{message.detail}</p>
+          {message.motivation && (
+            <p className="mt-1 mb-0 text-xs text-muted">{message.motivation}</p>
+          )}
         </div>
       </div>
     </div>
