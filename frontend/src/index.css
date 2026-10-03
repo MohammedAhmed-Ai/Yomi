@@ -113,6 +113,26 @@ body {
   text-decoration-color: var(--color-muted);
 }
 
+/* Deleting: fade out and collapse to nothing, measured per row via --exit-height. */
+.task-exit {
+  overflow: hidden;
+  animation:
+    task-exit 220ms var(--ease) forwards;
+}
+
+@keyframes task-exit {
+  from {
+    opacity: 1;
+    max-height: var(--exit-height, 12rem);
+  }
+  to {
+    opacity: 0;
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

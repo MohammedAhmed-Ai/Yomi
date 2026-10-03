@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent, ReactElement } from 'react';
-import { carryOver, getDay, getScore, createTask, completeTask, uncompleteTask, ApiError } from '../lib/api';
+import {
+  carryOver,
+  getDay,
+  getScore,
+  createTask,
+  updateTask,
+  completeTask,
+  uncompleteTask,
+  deleteTask,
+  ApiError,
+} from '../lib/api';
 import { todayISO } from '../lib/dates';
 import type { Day, DayScore, Task } from '../lib/types';
 import { ScoreCard } from '../components/ScoreCard';
@@ -42,11 +52,20 @@ function patchTask(tasks: Day['tasks'], id: number, update: (task: Task) => Task
   });
 }
 
+/** Drops a task from the tree wherever it appears. */
+function removeTask(tasks: Day['tasks'], id: number): Day['tasks'] {
+  return tasks
+    .filter((task) => task.id !== id)
+    .map((task) =>
+      task.subtasks.length === 0 ? task : { ...task, subtasks: removeTask(task.subtasks, id) },
+    );
+}
+
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
 }
 
-/** "Saturday, 3 October" — the long-form header, without the year. */
+/** "Saturday, 3 October" â€” the long-form header, without the year. */
 function formatHeading(iso: string): string {
   const [year, month, day] = iso.split('-').map(Number);
   return new Date(year, month - 1, day).toLocaleDateString('en-GB', {
@@ -68,8 +87,9 @@ export function TodayPage(): ReactElement {
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState('');
   const [busyId, setBusyId] = useState<number | null>(null);
-  const [toggleError, setToggleError] = useState('');
+  const [actionError, setActionError] = useState('');
   const [justAdded, setJustAdded] = useState<number | null>(null);
+  const [removing, setRemoving] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -137,7 +157,7 @@ export function TodayPage(): ReactElement {
 
     const wasDone = task.status === 'done';
     setBusyId(task.id);
-    setToggleError('');
+    setActionError('');
 
     // Optimistic: show the new state immediately, keep the server's task object
     // so a failure can be undone exactly.
@@ -163,8 +183,55 @@ export function TodayPage(): ReactElement {
       setDay((current) =>
         current ? { ...current, tasks: patchTask(current.tasks, task.id, () => task) } : current,
       );
-      setToggleError(errorMessage(error, 'Could not update that task.'));
+      setActionError(errorMessage(error, 'Could not update that task.'));
     } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleSave = async (task: Task, edit: { title: string; points: number }): Promise<void> => {
+    setActionError('');
+    try {
+      const updated = await updateTask(task.id, { title: edit.title, points: edit.points });
+      setDay((current) =>
+        current ? { ...current, tasks: patchTask(current.tasks, task.id, () => updated) } : current,
+      );
+      setScore(await getScore(todayISO()));
+    } catch (error: unknown) {
+      // Re-thrown so the row stays in edit mode with the message attached.
+      throw new Error(errorMessage(error, 'Could not save that task.'));
+    }
+  };
+
+  /** Marks the row as leaving; TaskItem calls handleDelete once it has collapsed. */
+  const handleDeleteRequest = (task: Task): void => {
+    if (removing[task.id]) return;
+    setActionError('');
+    setRemoving((current) => ({ ...current, [task.id]: true }));
+  };
+
+  const clearRemoving = (id: number): void => {
+    setRemoving((current) => {
+      if (!current[id]) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+  };
+
+  const handleDelete = async (task: Task): Promise<void> => {
+    setBusyId(task.id);
+    try {
+      await deleteTask(task.id);
+      setDay((current) =>
+        current ? { ...current, tasks: removeTask(current.tasks, task.id) } : current,
+      );
+      setScore(await getScore(todayISO()));
+    } catch (error: unknown) {
+      // Bring the row back and explain why it stayed.
+      setActionError(errorMessage(error, 'Could not delete that task.'));
+    } finally {
+      clearRemoving(task.id);
       setBusyId(null);
     }
   };
@@ -175,7 +242,7 @@ export function TodayPage(): ReactElement {
         <div className="h-6 w-48 animate-pulse rounded bg-border" />
         <div className="surface mt-3 h-24 animate-pulse" />
         <div className="surface mt-4 h-40 animate-pulse" />
-        <p className="mt-4 text-center text-sm text-muted">Loading today…</p>
+        <p className="mt-4 text-center text-sm text-muted">Loading todayâ€¦</p>
       </div>
     );
   }
@@ -222,7 +289,7 @@ export function TodayPage(): ReactElement {
             id="new-task"
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            placeholder="Add a task…"
+            placeholder="Add a taskâ€¦"
             disabled={adding}
             autoComplete="off"
             className="min-w-0 flex-1 rounded-[12px] border border-border bg-background px-3 py-1.5 text-sm text-text placeholder:text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60"
@@ -247,7 +314,7 @@ export function TodayPage(): ReactElement {
             disabled={!canAdd}
             className="press rounded-[12px] border border-primary bg-primary px-3 py-1.5 text-sm font-medium text-primary-contrast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-40"
           >
-            {adding ? 'Adding…' : 'Add'}
+            {adding ? 'Addingâ€¦' : 'Add'}
           </button>
         </form>
 
@@ -257,9 +324,9 @@ export function TodayPage(): ReactElement {
           </p>
         )}
 
-        {toggleError && (
+        {actionError && (
           <p className="mt-2 text-xs text-danger" role="alert">
-            {toggleError}
+            {actionError}
           </p>
         )}
       </div>
@@ -268,12 +335,19 @@ export function TodayPage(): ReactElement {
         <div className="surface mt-3 px-4 py-1">
           <ul className="m-0 list-none p-0">
             {tasks.map((task, index) => (
-              <li key={task.id} className="border-b border-border last:border-b-0">
+              <li
+                key={task.id}
+                className={removing[task.id] ? '' : 'border-b border-border last:border-b-0'}
+              >
                 <TaskItem
                   task={task}
                   index={index}
                   entering={task.id === justAdded}
+                  exiting={removing[task.id] ?? false}
                   onToggle={(target) => void handleToggle(target)}
+                  onSave={handleSave}
+                  onDeleteRequest={handleDeleteRequest}
+                  onDelete={(target) => void handleDelete(target)}
                   busy={busyId === task.id}
                 />
               </li>

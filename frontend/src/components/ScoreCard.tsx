@@ -91,7 +91,8 @@ export function ScoreCard({ score }: ScoreCardProps): ReactElement {
         <p className="m-0 text-sm text-muted">
           <span className={complete ? 'text-success' : undefined}>{percent}%</span>
           {' · '}
-          {score.tasks_done} of {score.tasks_total} tasks done
+          {score.tasks_done} of {score.tasks_total}{' '}
+          {score.tasks_total === 1 ? 'task' : 'tasks'} done
         </p>
       </div>
 
