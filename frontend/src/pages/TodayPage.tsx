@@ -43,44 +43,104 @@ const MOTIVATIONAL_LINES = [
   'Finish every task to unlock today’s points.',
 ];
 
+const STANDARD_NUDGE_COOLDOWN_MS = 5 * 60 * 1000;
+const NUDGE_STORAGE_PREFIX = 'yomi:nudge';
+const shownNudgeDates = new Set<string>();
+let lastStandardNudgeAt = 0;
+
 function chooseMotivation(previousIndex: number): { index: number; line: string } {
+  const safeLines = new Set([
+    'Finish them all and the day is yours.',
+    'One task at a time.',
+    'Keep your focus on the finish line.',
+    'Clear every task to claim the full score.',
+  ]);
   const options = MOTIVATIONAL_LINES.map((line, index) => ({ index, line })).filter(
-    (option) => option.index !== previousIndex,
+    (option) => option.index !== previousIndex && safeLines.has(option.line),
   );
   return options[Math.floor(Math.random() * options.length)];
 }
 
+type NudgeKind = 'first-today' | 'future';
+
 function makeNudgeMessage(
+  kind: 'reopen' | NudgeKind,
   date: string,
-  today: string,
-  wasComplete: boolean,
   score: DayScore,
   motivation: string,
 ): NudgeMessage {
-  const tasksLeft = score.tasks_total - score.tasks_done;
-  const taskLabel = tasksLeft === 1 ? 'task' : 'tasks';
-  const stats = `${tasksLeft} ${taskLabel} left · ${score.total_points} pts waiting`;
-  let detail: string;
+  if (kind === 'reopen') {
+    return {
+      title: 'Day reopened',
+      detail: 'A new task joined your day. Finish it to bring the full score back.',
+      motivation,
+    };
+  }
 
-  if (date > today) {
+  if (kind === 'future') {
     const [year, month, day] = date.split('-').map(Number);
     const weekday = new Date(year, month - 1, day).toLocaleDateString('en-GB', {
       weekday: 'long',
     });
     const totalTaskLabel = score.tasks_total === 1 ? 'task' : 'tasks';
-    detail = `Planned for ${weekday}. Complete all ${score.tasks_total} ${totalTaskLabel} that day to earn ${score.total_points} pts.`;
-  } else if (wasComplete) {
-    detail = 'A new task joined your day. Finish it to bring the full score back.';
-  } else {
-    detail = `Finish all your tasks to earn the full ${score.total_points} pts for today.`;
+    return {
+      title: 'Planning ahead',
+      detail: `Planned for ${weekday}. Complete all ${score.tasks_total} ${totalTaskLabel} that day to earn ${score.total_points} pts.`,
+      motivation,
+    };
   }
 
   return {
-    title: 'Every task counts',
-    stats,
-    detail,
+    title: 'How the day score works',
+    detail: `Finish every task today to earn the full ${score.total_points} pts. Miss one and the day scores 0.`,
     motivation,
   };
+}
+
+function hasShownDateNudge(kind: NudgeKind, date: string): boolean {
+  const key = `${NUDGE_STORAGE_PREFIX}:${kind}:${date}`;
+  if (shownNudgeDates.has(key)) return true;
+
+  try {
+    if (window.localStorage.getItem(key) === '1') {
+      shownNudgeDates.add(key);
+      return true;
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
+}
+
+function markDateNudgeShown(kind: NudgeKind, date: string): void {
+  const key = `${NUDGE_STORAGE_PREFIX}:${kind}:${date}`;
+  shownNudgeDates.add(key);
+  try {
+    window.localStorage.setItem(key, '1');
+  } catch {
+    // The in-memory set preserves the once-per-date rule for this session.
+  }
+}
+
+function canShowStandardNudge(now: number): boolean {
+  let lastShownAt = lastStandardNudgeAt;
+  try {
+    const stored = Number(window.localStorage.getItem(`${NUDGE_STORAGE_PREFIX}:last-standard`));
+    if (Number.isFinite(stored)) lastShownAt = Math.max(lastShownAt, stored);
+  } catch {
+    // The in-memory timestamp is the fallback when storage is unavailable.
+  }
+  return now - lastShownAt >= STANDARD_NUDGE_COOLDOWN_MS;
+}
+
+function markStandardNudgeShown(now: number): void {
+  lastStandardNudgeAt = now;
+  try {
+    window.localStorage.setItem(`${NUDGE_STORAGE_PREFIX}:last-standard`, String(now));
+  } catch {
+    // The in-memory timestamp preserves the cooldown for this session.
+  }
 }
 
 /** "Saturday, 3 October" — the long-form header, without the year. */
@@ -196,6 +256,7 @@ export function TodayPage(): ReactElement {
       const previous = dateRef.current;
       directionRef.current = next > previous ? 'forward' : next < previous ? 'back' : 'none';
       dateRef.current = next;
+      setNudge(null);
       setDate(next);
     };
 
@@ -283,18 +344,33 @@ export function TodayPage(): ReactElement {
         current ? { ...current, date, day: freshDay, score: freshScore } : current,
       );
       setJustAdded(created.id);
-      if (date >= today) {
+      const isReopen =
+        date === today &&
+        scoreBeforeAdd?.is_complete === true &&
+        !freshScore.is_complete;
+      let nudgeKind: 'reopen' | NudgeKind | null = null;
+
+      if (isReopen) {
+        nudgeKind = 'reopen';
+      } else if (scoreBeforeAdd?.tasks_total === 0 && date === today) {
+        nudgeKind = 'first-today';
+      } else if (scoreBeforeAdd?.tasks_total === 0 && date > today) {
+        nudgeKind = 'future';
+      }
+
+      if (nudgeKind === 'reopen') {
         const { index, line } = chooseMotivation(lastMotivationIndexRef.current);
         lastMotivationIndexRef.current = index;
-        setNudge(
-          makeNudgeMessage(
-            date,
-            today,
-            date === today && (scoreBeforeAdd?.is_complete ?? false),
-            freshScore,
-            line,
-          ),
-        );
+        setNudge(makeNudgeMessage(nudgeKind, date, freshScore, line));
+      } else if (nudgeKind && !hasShownDateNudge(nudgeKind, date)) {
+        const now = Date.now();
+        if (canShowStandardNudge(now)) {
+          markDateNudgeShown(nudgeKind, date);
+          markStandardNudgeShown(now);
+          const { index, line } = chooseMotivation(lastMotivationIndexRef.current);
+          lastMotivationIndexRef.current = index;
+          setNudge(makeNudgeMessage(nudgeKind, date, freshScore, line));
+        }
       }
     } catch (error: unknown) {
       setAddError(errorMessage(error, 'Could not add that task.'));
@@ -448,6 +524,16 @@ export function TodayPage(): ReactElement {
   const score = loaded?.score ?? null;
   const tasks = day ? rootTasks(day) : [];
   const canAdd = title.trim().length > 0 && !adding;
+  const pendingTasks = tasks.filter((task) => task.status === 'pending');
+  const lastTaskId =
+    isToday &&
+    loaded?.date === date &&
+    score !== null &&
+    score.tasks_total >= 2 &&
+    !score.is_complete &&
+    pendingTasks.length === 1
+      ? pendingTasks[0].id
+      : null;
 
   const slideClass =
     enterDirection === 'forward'
@@ -615,6 +701,11 @@ export function TodayPage(): ReactElement {
                       <TaskItem
                         task={task}
                         index={index}
+                        lastTaskHint={
+                          task.id === lastTaskId && score
+                            ? `Last one. ${score.total_points} pts are right there.`
+                            : undefined
+                        }
                         entering={task.id === justAdded}
                         exiting={removing[task.id] ?? false}
                         onToggle={canComplete ? (target) => void handleToggle(target) : undefined}

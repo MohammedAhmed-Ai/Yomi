@@ -11,6 +11,7 @@ interface TaskItemProps {
   task: Task;
   /** Drives the entrance stagger. */
   index: number;
+  lastTaskHint?: string;
   /** Renders the subtask tree indented, without the stagger animation. */
   nested?: boolean;
   /** Slides up on entry instead of fading, for a task just added. */
@@ -34,9 +35,45 @@ const EXIT_MS = 240;
 /** Only the first eight rows are staggered. */
 const STAGGER_LIMIT = 8;
 
+interface LastTaskHintProps {
+  message?: string;
+}
+
+interface LastTaskHintState {
+  prop?: string;
+  displayed: string;
+  visible: boolean;
+}
+
+function LastTaskHint({ message }: LastTaskHintProps): ReactElement {
+  const [hint, setHint] = useState<LastTaskHintState>({
+    displayed: '',
+    visible: false,
+  });
+  if (message !== hint.prop) {
+    setHint({
+      prop: message,
+      displayed: message ?? hint.displayed,
+      visible: Boolean(message),
+    });
+  }
+
+  return (
+    <span
+      aria-hidden="true"
+      className={`pointer-events-none absolute left-full top-1/2 z-10 ml-2 -translate-y-1/2 whitespace-nowrap text-[10px] font-normal text-muted no-underline transition-opacity duration-500 ${
+        hint.visible ? 'opacity-100' : 'opacity-0'
+      }`}
+    >
+      {hint.displayed}
+    </span>
+  );
+}
+
 export function TaskItem({
   task,
   index,
+  lastTaskHint,
   nested = false,
   entering = false,
   exiting = false,
@@ -240,18 +277,21 @@ export function TaskItem({
           editor
         ) : (
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-            {onSave && mutable ? (
-              <button
-                type="button"
-                onClick={startEditing}
-                aria-label={`Edit "${task.title}"`}
-                className={`min-w-0 rounded-[12px] text-left ${focusRing}`}
-              >
-                {titleText}
-              </button>
-            ) : (
-              titleText
-            )}
+            <span className="relative inline-block align-baseline">
+              {onSave && mutable ? (
+                <button
+                  type="button"
+                  onClick={startEditing}
+                  aria-label={`Edit "${task.title}"`}
+                  className={`min-w-0 rounded-[12px] text-left ${focusRing}`}
+                >
+                  {titleText}
+                </button>
+              ) : (
+                titleText
+              )}
+              <LastTaskHint message={lastTaskHint} />
+            </span>
             {badges}
           </div>
         )}
