@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { getRange, ApiError } from '../lib/api';
 import { addDays, todayISO } from '../lib/dates';
 import { useToday } from '../lib/useToday';
 import type { StatsRange } from '../lib/types';
+import { HistoryMonthView } from './HistoryMonthView';
 
 type Direction = 'forward' | 'back' | 'none';
 
@@ -52,21 +53,18 @@ function Arrow({ direction }: { direction: Direction }): ReactElement {
   );
 }
 
-export function HistoryPage(): ReactElement {
+function WeekHistoryView(): ReactElement {
   const today = useToday();
   const currentWeekStart = startOfWeek(today);
   const [weekStart, setWeekStart] = useState(() => startOfWeek(todayISO()));
   const [loaded, setLoaded] = useState<LoadedWeek | null>(null);
   const [failed, setFailed] = useState<FailedWeek | null>(null);
-  const [loadingStart, setLoadingStart] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const directionRef = useRef<Direction>('none');
   const [enterDirection, setEnterDirection] = useState<Direction>('none');
 
   useEffect(() => {
     let cancelled = false;
     const end = addDays(weekStart, 6);
-    setLoadingStart(weekStart);
 
     const load = async (): Promise<void> => {
       try {
@@ -74,13 +72,9 @@ export function HistoryPage(): ReactElement {
         if (cancelled) return;
         setLoaded({ ...result, start: weekStart });
         setFailed(null);
-        setEnterDirection(directionRef.current);
-        directionRef.current = 'none';
       } catch (error: unknown) {
         if (cancelled) return;
         setFailed({ start: weekStart, message: errorMessage(error) });
-      } finally {
-        if (!cancelled) setLoadingStart(null);
       }
     };
 
@@ -91,16 +85,11 @@ export function HistoryPage(): ReactElement {
   }, [weekStart, attempt]);
 
   const navigateWeek = (direction: 'forward' | 'back'): void => {
-    directionRef.current = direction;
+    setEnterDirection(direction);
     setWeekStart((current) => addDays(current, direction === 'forward' ? 7 : -7));
   };
 
-  const goToDay = (date: string): void => {
-    window.location.hash = `#/${date}`;
-  };
-
   const isStale = loaded !== null && loaded.start !== weekStart;
-  const isLoading = loadingStart === weekStart;
   const showError = failed?.start === weekStart;
   const visibleDays = loaded?.days ?? [];
   const completedDays = visibleDays.filter((day) => day.date <= today && day.is_complete).length;
@@ -151,7 +140,7 @@ export function HistoryPage(): ReactElement {
           <button
             type="button"
             onClick={() => {
-              directionRef.current = currentWeekStart > weekStart ? 'forward' : 'back';
+              setEnterDirection(currentWeekStart > weekStart ? 'forward' : 'back');
               setWeekStart(currentWeekStart);
             }}
             className={`press rounded-[12px] border border-border bg-surface px-3 py-1 text-sm text-text hover:border-primary hover:text-primary ${focusRing}`}
@@ -185,13 +174,13 @@ export function HistoryPage(): ReactElement {
       {loaded && (
         <div
           className={`transition-opacity duration-200 ${
-            isStale || isLoading ? 'pointer-events-none opacity-50' : 'opacity-100'
+            isStale ? 'pointer-events-none opacity-50' : 'opacity-100'
           }`}
-          aria-busy={isStale || isLoading}
+          aria-busy={isStale}
         >
           <div
             key={loaded.start}
-            className={`surface mt-3 px-2 py-5 sm:px-5 ${isStale || isLoading ? '' : slideClass}`}
+            className={`surface mt-3 px-2 py-5 sm:px-5 ${isStale ? '' : slideClass}`}
           >
             <div className="grid grid-cols-7 gap-1 sm:gap-3" aria-label="Week completion">
               {loaded.days.map((day, index) => {
@@ -201,14 +190,13 @@ export function HistoryPage(): ReactElement {
                 const percent = hasTasks ? Math.max(0, Math.min(day.completion_pct, 100)) : 0;
                 const [year, month, dateNumber] = day.date.split('-').map(Number);
                 const date = new Date(year, month - 1, dateNumber);
-                const weekday = date.toLocaleDateString('en-GB', { weekday: 'short' }).slice(0, 1);
+                const weekday = date.toLocaleDateString('en-GB', { weekday: 'short' });
                 const isToday = day.date === today;
 
                 return (
-                  <button
+                  <a
                     key={day.date}
-                    type="button"
-                    onClick={() => goToDay(day.date)}
+                    href={`#/${day.date}`}
                     aria-label={`${date.toLocaleDateString('en-GB', {
                       weekday: 'long',
                       day: 'numeric',
@@ -218,7 +206,9 @@ export function HistoryPage(): ReactElement {
                       future ? 'opacity-40' : ''
                     } ${isToday ? 'bg-background ring-1 ring-primary' : ''}`}
                   >
-                    <span className="text-xs font-medium uppercase text-muted">{weekday}</span>
+                    <span className="text-[10px] font-medium uppercase text-muted sm:text-xs">
+                      {weekday}
+                    </span>
                     <span className={`mt-1 text-sm tabular-nums ${isToday ? 'font-semibold text-primary' : 'text-text'}`}>
                       {dateNumber}
                     </span>
@@ -240,7 +230,7 @@ export function HistoryPage(): ReactElement {
                     <span className={`mt-2 text-xs tabular-nums ${complete ? 'font-semibold text-success' : 'text-muted'}`}>
                       {hasTasks ? day.score : '—'}
                     </span>
-                  </button>
+                  </a>
                 );
               })}
             </div>
@@ -271,5 +261,47 @@ export function HistoryPage(): ReactElement {
         </div>
       )}
     </section>
+  );
+}
+
+export function HistoryPage(): ReactElement {
+  const [monthView, setMonthView] = useState(() => window.location.hash === '#/history/month');
+
+  useEffect(() => {
+    const onHashChange = (): void =>
+      setMonthView(window.location.hash === '#/history/month');
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  return (
+    <>
+      <div className="mx-auto flex w-full max-w-[720px] justify-center px-4 pt-4">
+        <nav
+          aria-label="History view"
+          className="inline-flex rounded-[12px] border border-border bg-surface p-1"
+        >
+          <a
+            href="#/history"
+            aria-current={!monthView ? 'page' : undefined}
+            className={`rounded-[9px] px-4 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+              monthView ? 'text-muted hover:text-text' : 'bg-background font-medium text-text'
+            }`}
+          >
+            Week
+          </a>
+          <a
+            href="#/history/month"
+            aria-current={monthView ? 'page' : undefined}
+            className={`rounded-[9px] px-4 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+              monthView ? 'bg-background font-medium text-text' : 'text-muted hover:text-text'
+            }`}
+          >
+            Month
+          </a>
+        </nav>
+      </div>
+      {monthView ? <HistoryMonthView /> : <WeekHistoryView />}
+    </>
   );
 }
