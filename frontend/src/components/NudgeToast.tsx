@@ -10,11 +10,18 @@ export interface NudgeMessage {
 interface NudgeToastProps {
   message: NudgeMessage | null;
   onDismiss: () => void;
+  persistent?: boolean;
+  id?: string;
 }
 
 type NudgePhase = 'entering' | 'open' | 'exiting' | 'collapsing';
 
-export function NudgeToast({ message, onDismiss }: NudgeToastProps): ReactElement | null {
+export function NudgeToast({
+  message,
+  onDismiss,
+  persistent = false,
+  id,
+}: NudgeToastProps): ReactElement | null {
   const [phase, setPhase] = useState<NudgePhase>('entering');
   const [textChanging, setTextChanging] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -50,7 +57,7 @@ export function NudgeToast({ message, onDismiss }: NudgeToastProps): ReactElemen
   }, [message]);
 
   useEffect(() => {
-    if (!message || phase !== 'open') return;
+    if (!message || phase !== 'open' || persistent) return;
     if (paused) {
       remaining.current = 2000;
       return;
@@ -67,7 +74,7 @@ export function NudgeToast({ message, onDismiss }: NudgeToastProps): ReactElemen
         remaining.current = Math.max(0, remaining.current - (Date.now() - startedAt));
       }
     };
-  }, [message, paused, phase]);
+  }, [message, paused, phase, persistent]);
 
   useEffect(() => {
     if (!message || phase === 'exiting' || phase === 'collapsing') return;
@@ -117,6 +124,7 @@ export function NudgeToast({ message, onDismiss }: NudgeToastProps): ReactElemen
 
   return (
     <div
+      id={id}
       onAnimationEnd={handleSlotAnimationEnd}
       aria-hidden={dismissing}
       inert={dismissing}
