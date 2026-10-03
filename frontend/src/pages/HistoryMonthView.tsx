@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import { ApiError, getRange } from '../lib/api';
 import { addDays, todayISO } from '../lib/dates';
 import { useToday } from '../lib/useToday';
+import { plural } from '../lib/text';
 import type { StatsRange } from '../lib/types';
 
 type Direction = 'forward' | 'back' | 'none';
@@ -243,7 +244,7 @@ export function HistoryMonthView(): ReactElement {
                 <span className="font-semibold text-text">
                   {daysComplete} of {daysInMonth.length}
                 </span>{' '}
-                days complete
+                {plural(daysInMonth.length, 'day', 'days')} complete
               </p>
               <p className="m-0 text-sm text-muted">
                 Total score <span className="font-semibold text-text">{totalScore} pts</span>

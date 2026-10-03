@@ -343,7 +343,9 @@ export function TaskItem({
 
       <span
         aria-hidden={editing}
-        className={`task-points shrink-0 text-xs text-muted tabular-nums ${
+        className={`task-points shrink-0 text-xs ${
+          nested ? 'leading-4' : 'leading-5'
+        } text-muted tabular-nums ${
           editing ? 'task-edit-side-hidden' : ''
         }`}
         data-done={done}
