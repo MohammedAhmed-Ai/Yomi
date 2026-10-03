@@ -71,15 +71,6 @@ export function ScoreCard({ score }: ScoreCardProps): ReactElement {
     setPulse(score.is_complete);
   }
 
-  if (score.is_empty) {
-    return (
-      <section className="surface fade-in px-5 py-6 text-center" aria-label="Daily score">
-        <p className="m-0 text-base text-muted">Nothing planned for today yet.</p>
-        <p className="m-0 mt-1 text-sm text-muted">A clear day is still a day.</p>
-      </section>
-    );
-  }
-
   const percent =
     score.tasks_total > 0 ? Math.round((score.tasks_done / score.tasks_total) * 100) : 0;
   const complete = score.is_complete;
@@ -106,6 +97,13 @@ export function ScoreCard({ score }: ScoreCardProps): ReactElement {
           {score.tasks_total === 1 ? 'task' : 'tasks'} done
         </p>
       </div>
+
+      {score.is_empty && (
+        <div className="mt-3 text-center">
+          <p className="m-0 text-base text-muted">Nothing planned for today yet.</p>
+          <p className="m-0 mt-1 text-sm text-muted">A clear day is still a day.</p>
+        </div>
+      )}
 
       <div
         className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-border"

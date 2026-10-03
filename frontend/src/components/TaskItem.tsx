@@ -31,8 +31,8 @@ interface TaskItemProps {
 
 const EXIT_MS = 240;
 
-/** Only the first eight rows are offset; the rest arrive together. */
-const STAGGER_CAP = 7;
+/** Only the first eight rows are staggered. */
+const STAGGER_LIMIT = 8;
 
 export function TaskItem({
   task,
@@ -216,7 +216,7 @@ export function TaskItem({
       className={`group flex items-start gap-3 py-2 ${missed ? 'opacity-45' : ''} ${entrance} ${
         exiting ? 'task-exit' : ''
       }`}
-      style={{ '--stagger-index': Math.min(index, STAGGER_CAP) } as React.CSSProperties}
+      style={{ '--stagger-index': index < STAGGER_LIMIT ? index : 0 } as React.CSSProperties}
     >
       {onToggle && !missed ? (
         <button
