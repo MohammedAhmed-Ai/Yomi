@@ -143,6 +143,18 @@ body {
   animation: slide-in-back var(--dur) var(--ease) forwards;
 }
 
+.week-bar {
+  transform: scaleY(0);
+  transform-origin: bottom;
+  animation: bar-grow 650ms var(--ease) forwards;
+}
+
+@keyframes bar-grow {
+  to {
+    transform: scaleY(1);
+  }
+}
+
 @keyframes slide-in-forward {
   from {
     opacity: 0;

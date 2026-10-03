@@ -3,6 +3,7 @@ import type {
   Day,
   DayScore,
   DayUpdate,
+  StatsRange,
   Tag,
   Task,
   TaskCreate,
@@ -90,6 +91,12 @@ export function getDay(date: string): Promise<Day> {
 /** All-or-nothing score. Does not create the Day row. */
 export function getScore(date: string): Promise<DayScore> {
   return request<DayScore>(`/days/${date}/score`);
+}
+
+/** Fetch scoring data for each day in an inclusive date range. */
+export function getRange(start: string, end: string): Promise<StatsRange> {
+  const query = new URLSearchParams({ start, end });
+  return request<StatsRange>(`/stats/range?${query.toString()}`);
 }
 
 /** Mark the day as started. Idempotent: the first start time is kept. */
