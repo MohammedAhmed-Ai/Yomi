@@ -1,0 +1,68 @@
+﻿@import 'tailwindcss';
+@import './styles/theme.css';
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-text);
+  border-color: var(--color-border);
+  transition: background-color 200ms var(--ease), color 200ms var(--ease), border-color 200ms var(--ease);
+}
+
+.surface {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+}
+
+.fade-in {
+  opacity: 0;
+  animation: fade-in var(--dur) var(--ease) forwards;
+}
+
+.slide-up {
+  opacity: 0;
+  transform: translateY(4px);
+  animation: slide-up var(--dur) var(--ease) forwards;
+}
+
+.press {
+  transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+
+.press:hover {
+  transform: translateY(-1px);
+}
+
+.press:active {
+  transform: scale(0.98);
+}
+
+@keyframes fade-in {
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
