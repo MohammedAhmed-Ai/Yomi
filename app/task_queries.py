@@ -23,20 +23,3 @@ def get_active_task(db: Session, task_id: int) -> Task | None:
 
 def is_active_task(task: Task) -> bool:
     return task.status != "deleted"
-
-
-def load_source_miss_reasons(db: Session, tasks: list[Task]) -> list[Task]:
-    """Populate carried copies' source reasons with one batched lookup."""
-    source_ids = {task.carried_from_id for task in tasks if task.carried_from_id is not None}
-    if not source_ids:
-        return tasks
-
-    reasons = dict(
-        db.execute(
-            select(Task.id, Task.miss_reason).where(Task.id.in_(source_ids))
-        ).all()
-    )
-    for task in tasks:
-        if task.carried_from_id is not None:
-            task.source_miss_reason = reasons.get(task.carried_from_id)
-    return tasks

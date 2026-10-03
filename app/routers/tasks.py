@@ -16,7 +16,7 @@ from typing import List, Optional
 from app.db import get_db
 from app.models import Day, Task, utcnow
 from app.schemas import TaskCreate, TaskUpdate, TaskOut
-from app.task_queries import active_tasks, get_active_task, load_source_miss_reasons
+from app.task_queries import active_tasks, get_active_task
 from app.time_utils import local_date
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -198,4 +198,4 @@ def list_tasks(
         query = query.where(Task.status == status)
 
     result = db.execute(query).scalars().all()
-    return load_source_miss_reasons(db, result)
+    return result
