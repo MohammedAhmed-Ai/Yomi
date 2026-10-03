@@ -201,7 +201,8 @@ export function TaskItem({
 
   const titleText = (
     <span
-      className={`task-title ${nested ? 'text-xs' : 'text-sm'}`}
+      dir="auto"
+      className={`task-title user-text ${nested ? 'text-xs' : 'text-sm'}`}
       data-done={done}
       data-title={task.title}
     >
@@ -235,6 +236,7 @@ export function TaskItem({
       </label>
       <input
         id={`title-${task.id}`}
+        dir="auto"
         value={draftTitle}
         disabled={saving}
         onChange={(event) => setDraftTitle(event.target.value)}
@@ -303,7 +305,7 @@ export function TaskItem({
                   type="button"
                   onClick={startEditing}
                   aria-label={`Edit "${task.title}"`}
-                  className={`min-w-0 rounded-[12px] text-left ${focusRing}`}
+                  className={`min-w-0 rounded-[12px] text-start ${focusRing}`}
                 >
                   {titleText}
                 </button>
@@ -314,7 +316,11 @@ export function TaskItem({
             </span>
             {badges}
           </div>
-          {task.notes && <p className="mt-0.5 mb-0 text-xs text-muted">{task.notes}</p>}
+          {task.notes && (
+            <p dir="auto" className="user-text mt-0.5 mb-0 text-xs text-muted">
+              {task.notes}
+            </p>
+          )}
           {editError && (
             <p className="mt-1 mb-0 text-xs text-danger" role="alert">
               {editError}

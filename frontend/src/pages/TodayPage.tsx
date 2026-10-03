@@ -690,12 +690,13 @@ export function TodayPage(): ReactElement {
                 </label>
                 <input
                   id="new-task"
+                  dir="auto"
                   value={title}
                   onChange={(event) => setTitle(event.target.value)}
                   placeholder="Add a task…"
                   disabled={adding}
                   autoComplete="off"
-                  className="min-w-0 flex-1 rounded-[12px] border border-border bg-background px-3 py-1.5 text-sm text-text placeholder:text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60"
+                  className="min-w-0 flex-1 rounded-[12px] border border-border bg-background px-3 py-1.5 text-start text-sm text-text placeholder:text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60"
                 />
 
                 <label htmlFor="new-task-points" className="sr-only">
