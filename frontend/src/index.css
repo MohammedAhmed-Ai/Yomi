@@ -124,6 +124,11 @@ body {
   text-decoration: none;
 }
 
+.user-text {
+  text-align: start;
+  unicode-bidi: plaintext;
+}
+
 .task-title-base {
   transition: opacity var(--dur) var(--ease);
 }
@@ -156,6 +161,10 @@ body {
   transform: scaleX(0);
   transform-origin: left;
   transition: transform var(--dur) var(--ease);
+}
+
+:dir(rtl) .task-title::after {
+  transform-origin: right;
 }
 
 .task-title[data-done='true']::after {
