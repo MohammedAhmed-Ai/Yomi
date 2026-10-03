@@ -43,6 +43,18 @@ body {
   transform: scale(0.98);
 }
 
+/* Calm entrance delay for lists. Animation-delay is the only stagger channel. */
+.stagger {
+  animation-delay: calc(var(--stagger-index, 0) * 40ms);
+}
+
+/* One soft breath when the day is complete. Opacity only. */
+.pulse-once {
+  animation:
+    fade-in var(--dur) var(--ease) forwards,
+    pulse-once 1200ms var(--ease) 400ms;
+}
+
 @keyframes fade-in {
   to {
     opacity: 1;
@@ -53,6 +65,16 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes pulse-once {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.82;
   }
 }
 
