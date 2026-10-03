@@ -171,6 +171,18 @@ def test_missed_task_accepts_miss_reason_patch(client):
     assert response.json()["miss_reason"] == "tired"
 
 
+def test_carried_copy_includes_original_miss_reason(client):
+    task = _make_missed_task(client)
+    reason = client.patch(
+        f"/api/tasks/{task['id']}", json={"miss_reason": "too_big"}
+    )
+    assert reason.status_code == 200
+
+    carried = client.get(f"/api/days/{date.today().isoformat()}").json()["tasks"]
+    copy = next(item for item in carried if item["carried_from_id"] == task["id"])
+    assert copy["source_miss_reason"] == "too_big"
+
+
 def test_missed_task_rejects_other_patch_fields(client):
     task = _make_missed_task(client)
     response = client.patch(f"/api/tasks/{task['id']}", json={"title": "Changed"})

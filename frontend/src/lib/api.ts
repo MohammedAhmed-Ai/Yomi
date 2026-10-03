@@ -3,6 +3,7 @@ import type {
   Day,
   DayScore,
   DayUpdate,
+  MissReason,
   StatsRange,
   Tag,
   Task,
@@ -126,6 +127,11 @@ export function updateTask(id: number, data: TaskUpdate): Promise<Task> {
     method: 'PATCH',
     body: JSON.stringify(data),
   });
+}
+
+/** Set or clear the reason on a missed task (including locked historical days). */
+export function updateMissReason(id: number, missReason: MissReason | null): Promise<Task> {
+  return updateTask(id, { miss_reason: missReason });
 }
 
 /** No-op if already done. 409 if the task was missed, 423 if the day is locked. */

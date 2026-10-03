@@ -9,6 +9,8 @@
 /** "pending" | "done" | "missed" | "deleted". See Task.status in app/models.py. */
 export type TaskStatus = 'pending' | 'done' | 'missed' | 'deleted';
 
+export type MissReason = 'tired' | 'no_time' | 'forgot' | 'too_big' | 'emergency' | 'other';
+
 /** 0 (none) through 3 (highest). */
 export type Priority = 0 | 1 | 2 | 3;
 
@@ -32,6 +34,9 @@ export interface Task {
   sort_order: number;
 
   status: TaskStatus;
+  miss_reason: MissReason | null;
+  /** Reason stored on the original task for a carried-over copy. */
+  source_miss_reason: MissReason | null;
   completed_at: string | null;
   completed_date: string | null;
   carry_count: number;
@@ -123,7 +128,7 @@ export interface TaskUpdate {
   notes?: string | null;
   points?: number;
   priority?: Priority;
-  miss_reason?: string | null;
+  miss_reason?: MissReason | null;
   sort_order?: number;
 }
 

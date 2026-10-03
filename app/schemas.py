@@ -50,6 +50,9 @@ class TaskOut(TaskBase):
     miss_reason: Optional[Literal[
         "tired", "no_time", "forgot", "too_big", "emergency", "other"
     ]] = None
+    source_miss_reason: Optional[Literal[
+        "tired", "no_time", "forgot", "too_big", "emergency", "other"
+    ]] = None
     completed_at: Optional[datetime] = None
     completed_date: Optional[date] = None
     carry_count: int
