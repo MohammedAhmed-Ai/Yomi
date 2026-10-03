@@ -329,6 +329,20 @@ body {
   animation: score-line-complete 1200ms var(--ease) both;
 }
 
+.next-task-highlight {
+  animation: next-task-highlight 1200ms var(--ease) both;
+}
+
+@keyframes next-task-highlight {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  20% {
+    background-color: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  }
+}
+
 @keyframes nudge-toast-space-open {
   from {
     grid-template-rows: 0fr;

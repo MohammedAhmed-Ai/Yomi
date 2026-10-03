@@ -1,9 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { DayScore } from '../lib/types';
+import { NudgeToast } from './NudgeToast';
+import type { NudgeMessage } from './NudgeToast';
 
 interface ScoreCardProps {
   score: DayScore;
+  pendingTaskCount?: number;
+  onNextTask?: () => void;
 }
 
 function easeOutCubic(t: number): number {
@@ -58,9 +62,14 @@ function useCountUp(target: number): number {
   return prefersReducedMotion() ? target : value;
 }
 
-export function ScoreCard({ score }: ScoreCardProps): ReactElement {
+export function ScoreCard({
+  score,
+  pendingTaskCount = 0,
+  onNextTask,
+}: ScoreCardProps): ReactElement {
   const counted = useCountUp(score.earned_points);
   const countedTotal = useCountUp(score.total_points);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   // Pulse only on the transition into a complete day, not on first paint.
   // Adjusting state during render is React's documented pattern for reacting to
@@ -78,6 +87,18 @@ export function ScoreCard({ score }: ScoreCardProps): ReactElement {
   const dayScoreLine = complete
     ? `Day score: ${score.score}`
     : `Day score: ${score.score} · finish all tasks to earn ${score.total_points}`;
+  const helpMessage = useMemo<NudgeMessage | null>(
+    () =>
+      helpOpen
+        ? {
+            title: 'How the day score works',
+            detail: complete
+              ? `Day complete. ${score.total_points} pts earned.`
+              : `Finish every task today to earn the full ${score.total_points} pts. ${pendingTaskCount} tasks left.`,
+          }
+        : null,
+    [complete, helpOpen, pendingTaskCount, score.total_points],
+  );
 
   return (
     <section className="surface fade-in px-5 py-5" aria-label="Daily score">
@@ -100,17 +121,48 @@ export function ScoreCard({ score }: ScoreCardProps): ReactElement {
       </div>
 
       {!score.is_empty && (
-        <p
+        <div
           key={dayScoreLine}
           onAnimationEnd={() => {
             if (pulse) setPulse(false);
           }}
-          className={`score-line-change mt-2 mb-0 text-xs ${
+          className={`score-line-change mt-2 flex items-center justify-between gap-2 text-xs ${
             complete ? `text-success ${pulse ? 'pulse-once' : ''}` : 'text-muted'
           }`}
         >
-          {dayScoreLine}
-        </p>
+          <span>{dayScoreLine}</span>
+          <span className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              aria-label="How the day score works"
+              aria-expanded={helpOpen}
+              aria-controls="day-score-help"
+              onFocus={() => setHelpOpen(true)}
+              onClick={() => setHelpOpen(true)}
+              className="flex h-5 w-5 items-center justify-center rounded-full border border-border text-[11px] font-semibold leading-none text-muted transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              i
+            </button>
+            {onNextTask && (
+              <button
+                type="button"
+                onClick={onNextTask}
+                className="rounded text-xs text-muted underline-offset-2 transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                Next task
+              </button>
+            )}
+          </span>
+        </div>
+      )}
+
+      {!score.is_empty && (
+        <NudgeToast
+          id="day-score-help"
+          message={helpMessage}
+          onDismiss={() => setHelpOpen(false)}
+          persistent
+        />
       )}
 
       {score.is_empty && (

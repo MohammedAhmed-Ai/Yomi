@@ -217,8 +217,17 @@ export function TodayPage(): ReactElement {
   const [removing, setRemoving] = useState<Record<number, DeletePhase>>({});
   const deleteOperations = useRef(new Map<number, DeleteOperation>());
   const taskListRef = useRef<HTMLUListElement | null>(null);
+  const highlightFrame = useRef<number | undefined>(undefined);
+  const [highlightedTaskId, setHighlightedTaskId] = useState<number | null>(null);
   const previousTaskPositions = useRef(new Map<number, number>());
   const previousTaskOrder = useRef<number[]>([]);
+
+  useEffect(
+    () => () => {
+      if (highlightFrame.current !== undefined) cancelAnimationFrame(highlightFrame.current);
+    },
+    [],
+  );
 
   // Compared against the hash so browser back/forward slides the right way too.
   const dateRef = useRef(date);
@@ -586,6 +595,24 @@ export function TodayPage(): ReactElement {
       ? pendingTasks[0].id
       : null;
 
+  const scrollToNextTask = (): void => {
+    const nextTask = pendingTasks[0];
+    if (!nextTask) return;
+
+    const row = taskListRef.current?.querySelector<HTMLLIElement>(
+      `li[data-task-id="${nextTask.id}"]`,
+    );
+    if (!row) return;
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    row.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'center' });
+    if (highlightFrame.current !== undefined) cancelAnimationFrame(highlightFrame.current);
+    setHighlightedTaskId(null);
+    highlightFrame.current = requestAnimationFrame(() => {
+      setHighlightedTaskId(nextTask.id);
+    });
+  };
+
   const slideClass =
     enterDirection === 'forward'
       ? 'slide-forward'
@@ -667,7 +694,18 @@ export function TodayPage(): ReactElement {
           }`}
         >
           <div className="mt-3">
-            <ScoreCard score={score} />
+            <ScoreCard
+              score={score}
+              pendingTaskCount={pendingTasks.length}
+              onNextTask={
+                isToday &&
+                loaded?.date === date &&
+                !score.is_complete &&
+                pendingTasks.length > 0
+                  ? scrollToNextTask
+                  : undefined
+              }
+            />
           </div>
 
           {loaded?.warning && (
@@ -749,14 +787,24 @@ export function TodayPage(): ReactElement {
                     <li
                       key={task.id}
                       data-task-id={task.id}
-                      className={removing[task.id] ? '' : 'border-b border-border last:border-b-0'}
+                      onAnimationEnd={(event) => {
+                        if (
+                          event.animationName === 'next-task-highlight' &&
+                          highlightedTaskId === task.id
+                        ) {
+                          setHighlightedTaskId(null);
+                        }
+                      }}
+                      className={`${removing[task.id] ? '' : 'border-b border-border last:border-b-0'} ${
+                        highlightedTaskId === task.id ? 'next-task-highlight' : ''
+                      }`}
                     >
                       <TaskItem
                         task={task}
                         index={index}
                         lastTaskHint={
                           task.id === lastTaskId && score
-                            ? `Last one. ${score.total_points} pts are right there.`
+                            ? `Last one. Finish it to earn the full ${score.total_points} pts.`
                             : undefined
                         }
                         entering={task.id === justAdded}
