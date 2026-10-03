@@ -60,6 +60,7 @@ function useCountUp(target: number): number {
 
 export function ScoreCard({ score }: ScoreCardProps): ReactElement {
   const counted = useCountUp(score.earned_points);
+  const countedTotal = useCountUp(score.total_points);
 
   // Pulse only on the transition into a complete day, not on first paint.
   // Adjusting state during render is React's documented pattern for reacting to
@@ -86,7 +87,7 @@ export function ScoreCard({ score }: ScoreCardProps): ReactElement {
             className="text-3xl font-semibold text-text"
             style={{ fontVariantNumeric: 'tabular-nums' }}
           >
-            {counted} / {score.total_points}
+            {score.is_empty ? '0' : `${counted} / ${countedTotal}`}
           </span>
           <span className="ml-1 text-sm text-muted">pts</span>
         </p>
@@ -98,17 +99,19 @@ export function ScoreCard({ score }: ScoreCardProps): ReactElement {
         </p>
       </div>
 
-      <p
-        key={dayScoreLine}
-        onAnimationEnd={() => {
-          if (pulse) setPulse(false);
-        }}
-        className={`score-line-change mt-2 mb-0 text-xs ${
-          complete ? `text-success ${pulse ? 'pulse-once' : ''}` : 'text-muted'
-        }`}
-      >
-        {dayScoreLine}
-      </p>
+      {!score.is_empty && (
+        <p
+          key={dayScoreLine}
+          onAnimationEnd={() => {
+            if (pulse) setPulse(false);
+          }}
+          className={`score-line-change mt-2 mb-0 text-xs ${
+            complete ? `text-success ${pulse ? 'pulse-once' : ''}` : 'text-muted'
+          }`}
+        >
+          {dayScoreLine}
+        </p>
+      )}
 
       {score.is_empty && (
         <div className="mt-3 text-center">

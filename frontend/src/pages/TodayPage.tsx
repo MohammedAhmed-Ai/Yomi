@@ -43,11 +43,6 @@ const MOTIVATIONAL_LINES = [
   'Finish every task to unlock today’s points.',
 ];
 
-const STANDARD_NUDGE_COOLDOWN_MS = 5 * 60 * 1000;
-const NUDGE_STORAGE_PREFIX = 'yomi:nudge';
-const shownNudgeDates = new Set<string>();
-let lastStandardNudgeAt = 0;
-
 function chooseMotivation(previousIndex: number): { index: number; line: string } {
   const safeLines = new Set([
     'Finish them all and the day is yours.',
@@ -95,52 +90,6 @@ function makeNudgeMessage(
     detail: `Finish every task today to earn the full ${score.total_points} pts. Miss one and the day scores 0.`,
     motivation,
   };
-}
-
-function hasShownDateNudge(kind: NudgeKind, date: string): boolean {
-  const key = `${NUDGE_STORAGE_PREFIX}:${kind}:${date}`;
-  if (shownNudgeDates.has(key)) return true;
-
-  try {
-    if (window.localStorage.getItem(key) === '1') {
-      shownNudgeDates.add(key);
-      return true;
-    }
-  } catch {
-    return false;
-  }
-
-  return false;
-}
-
-function markDateNudgeShown(kind: NudgeKind, date: string): void {
-  const key = `${NUDGE_STORAGE_PREFIX}:${kind}:${date}`;
-  shownNudgeDates.add(key);
-  try {
-    window.localStorage.setItem(key, '1');
-  } catch {
-    // The in-memory set preserves the once-per-date rule for this session.
-  }
-}
-
-function canShowStandardNudge(now: number): boolean {
-  let lastShownAt = lastStandardNudgeAt;
-  try {
-    const stored = Number(window.localStorage.getItem(`${NUDGE_STORAGE_PREFIX}:last-standard`));
-    if (Number.isFinite(stored)) lastShownAt = Math.max(lastShownAt, stored);
-  } catch {
-    // The in-memory timestamp is the fallback when storage is unavailable.
-  }
-  return now - lastShownAt >= STANDARD_NUDGE_COOLDOWN_MS;
-}
-
-function markStandardNudgeShown(now: number): void {
-  lastStandardNudgeAt = now;
-  try {
-    window.localStorage.setItem(`${NUDGE_STORAGE_PREFIX}:last-standard`, String(now));
-  } catch {
-    // The in-memory timestamp preserves the cooldown for this session.
-  }
 }
 
 /** "Saturday, 3 October" — the long-form header, without the year. */
@@ -362,15 +311,10 @@ export function TodayPage(): ReactElement {
         const { index, line } = chooseMotivation(lastMotivationIndexRef.current);
         lastMotivationIndexRef.current = index;
         setNudge(makeNudgeMessage(nudgeKind, date, freshScore, line));
-      } else if (nudgeKind && !hasShownDateNudge(nudgeKind, date)) {
-        const now = Date.now();
-        if (canShowStandardNudge(now)) {
-          markDateNudgeShown(nudgeKind, date);
-          markStandardNudgeShown(now);
-          const { index, line } = chooseMotivation(lastMotivationIndexRef.current);
-          lastMotivationIndexRef.current = index;
-          setNudge(makeNudgeMessage(nudgeKind, date, freshScore, line));
-        }
+      } else if (nudgeKind) {
+        const { index, line } = chooseMotivation(lastMotivationIndexRef.current);
+        lastMotivationIndexRef.current = index;
+        setNudge(makeNudgeMessage(nudgeKind, date, freshScore, line));
       }
     } catch (error: unknown) {
       setAddError(errorMessage(error, 'Could not add that task.'));
