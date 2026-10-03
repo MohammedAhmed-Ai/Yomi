@@ -12,57 +12,115 @@ interface NudgeToastProps {
   onDismiss: () => void;
 }
 
+type NudgePhase = 'entering' | 'open' | 'exiting' | 'collapsing';
+
 export function NudgeToast({ message, onDismiss }: NudgeToastProps): ReactElement | null {
-  const [dismissedMessage, setDismissedMessage] = useState<NudgeMessage | null>(null);
+  const [phase, setPhase] = useState<NudgePhase>('entering');
+  const [textChanging, setTextChanging] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  const remaining = useRef(6000);
-  const visible = message !== null && message !== dismissedMessage;
+  const previousMessage = useRef(message);
+  const phaseRef = useRef(phase);
+  const remaining = useRef(4000);
   const paused = hovered || focused;
 
+  const updatePhase = (nextPhase: NudgePhase): void => {
+    phaseRef.current = nextPhase;
+    setPhase(nextPhase);
+  };
+
   useEffect(() => {
-    remaining.current = 6000;
+    if (message === previousMessage.current) return;
+
+    const wasReplacingOpenMessage = previousMessage.current !== null && phaseRef.current === 'open';
+    previousMessage.current = message;
+    remaining.current = 4000;
+    setTextChanging(false);
+
+    if (!message || !wasReplacingOpenMessage) {
+      updatePhase('entering');
+      setHovered(false);
+      setFocused(false);
+      return;
+    }
+
+    setTextChanging(true);
+    const timeout = window.setTimeout(() => setTextChanging(false), 180);
+    return () => window.clearTimeout(timeout);
   }, [message]);
 
   useEffect(() => {
-    if (!message || !visible || paused) return;
+    if (!message || phase !== 'open') return;
+    if (paused) {
+      remaining.current = 2000;
+      return;
+    }
 
     const startedAt = Date.now();
     const timeout = window.setTimeout(() => {
-      setDismissedMessage(message);
+      updatePhase('exiting');
     }, remaining.current);
 
     return () => {
       window.clearTimeout(timeout);
-      remaining.current = Math.max(0, remaining.current - (Date.now() - startedAt));
+      if (phaseRef.current === 'open') {
+        remaining.current = Math.max(0, remaining.current - (Date.now() - startedAt));
+      }
     };
-  }, [message, paused, visible]);
+  }, [message, paused, phase]);
 
   useEffect(() => {
-    if (!visible) return;
+    if (!message || phase === 'exiting' || phase === 'collapsing') return;
 
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
-        setDismissedMessage(message);
+        updatePhase('exiting');
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [message, visible]);
+  }, [message, phase]);
 
-  const handleAnimationEnd = (event: AnimationEvent<HTMLDivElement>): void => {
-    if (event.target === event.currentTarget && !visible && message) {
+  const handleSlotAnimationEnd = (event: AnimationEvent<HTMLDivElement>): void => {
+    if (event.target !== event.currentTarget || !message) return;
+
+    if (event.animationName === 'nudge-toast-reduced-enter' && phase === 'entering') {
+      updatePhase('open');
+    } else if (
+      event.animationName === 'nudge-toast-space-close' ||
+      event.animationName === 'nudge-toast-reduced-exit'
+    ) {
       onDismiss();
+    }
+  };
+
+  const handleCardAnimationEnd = (event: AnimationEvent<HTMLDivElement>): void => {
+    if (
+      event.target === event.currentTarget &&
+      event.animationName === 'nudge-toast-card-enter' &&
+      phase === 'entering'
+    ) {
+      updatePhase('open');
+    } else if (
+      event.target === event.currentTarget &&
+      event.animationName === 'nudge-toast-card-exit' &&
+      phase === 'exiting'
+    ) {
+      updatePhase('collapsing');
     }
   };
 
   if (!message) return null;
 
+  const dismissing = phase === 'exiting' || phase === 'collapsing';
+
   return (
     <div
-      onAnimationEnd={handleAnimationEnd}
-      className={`nudge-toast-slot mt-3 grid ${visible ? 'nudge-toast-enter' : 'nudge-toast-exit'}`}
+      onAnimationEnd={handleSlotAnimationEnd}
+      aria-hidden={dismissing}
+      inert={dismissing}
+      className={`nudge-toast-slot mt-3 grid nudge-toast-${phase}`}
     >
       <div
         role="status"
@@ -75,16 +133,19 @@ export function NudgeToast({ message, onDismiss }: NudgeToastProps): ReactElemen
         }}
         className="nudge-toast-content min-h-0 overflow-hidden"
       >
-        <div className="surface px-4 py-3 text-text">
+        <div
+          onAnimationEnd={handleCardAnimationEnd}
+          className="nudge-toast-card surface px-4 py-3 text-text"
+        >
           <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
+            <div className={`min-w-0 ${textChanging ? 'nudge-toast-copy-change' : ''}`}>
               <p className="m-0 text-sm font-semibold">{message.title}</p>
             </div>
             <button
               type="button"
               aria-label="Dismiss nudge"
               onClick={() => {
-                setDismissedMessage(message);
+                updatePhase('exiting');
               }}
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-background hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
@@ -93,10 +154,12 @@ export function NudgeToast({ message, onDismiss }: NudgeToastProps): ReactElemen
               </svg>
             </button>
           </div>
-          <p className="mt-1 mb-0 text-sm">{message.detail}</p>
-          {message.motivation && (
-            <p className="mt-1 mb-0 text-xs text-muted">{message.motivation}</p>
-          )}
+          <div className={textChanging ? 'nudge-toast-copy-change' : ''}>
+            <p className="mt-1 mb-0 text-sm">{message.detail}</p>
+            {message.motivation && (
+              <p className="mt-1 mb-0 text-xs text-muted">{message.motivation}</p>
+            )}
+          </div>
         </div>
       </div>
     </div>
