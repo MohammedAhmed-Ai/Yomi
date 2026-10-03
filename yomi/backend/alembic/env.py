@@ -10,15 +10,16 @@ import os
 # repo root (three levels up: alembic/ -> backend/ -> yomi/ -> repo root)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
+from app.db import DATABASE_URL
 from app.models import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
-# The app and the migrations must always target the same database.
-if url := os.getenv("DATABASE_URL"):
-    config.set_main_option("sqlalchemy.url", url)
+# Single source of truth: the same URL the app connects with, absolute and
+# independent of the working directory. DATABASE_URL still overrides it.
+config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
