@@ -78,6 +78,41 @@ body {
   }
 }
 
+/* --- Task row interaction --- */
+
+/* The circle fills rather than snapping: colours and a touch of scale. */
+.task-circle {
+  transition:
+    background-color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+
+/* The tick fades in with the fill. */
+.task-check {
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+}
+
+.task-circle[data-done='true'] .task-check {
+  opacity: 1;
+}
+
+/* The strike-through grows in via text-decoration-color, so it fades softly. */
+.task-title {
+  text-decoration-line: none;
+  text-decoration-color: transparent;
+  transition:
+    color var(--dur) var(--ease),
+    text-decoration-color var(--dur) var(--ease);
+}
+
+.task-title[data-done='true'] {
+  color: var(--color-muted);
+  text-decoration-line: line-through;
+  text-decoration-color: var(--color-muted);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

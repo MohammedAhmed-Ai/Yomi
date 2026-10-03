@@ -50,6 +50,16 @@ function useCountUp(target: number): number {
 export function ScoreCard({ score }: ScoreCardProps): ReactElement {
   const counted = useCountUp(score.score);
 
+  // Pulse only on the transition into a complete day, not on first paint.
+  // Adjusting state during render is React's documented pattern for reacting to
+  // a prop change, and avoids an extra render pass from an effect.
+  const [wasComplete, setWasComplete] = useState(score.is_complete);
+  const [pulse, setPulse] = useState(false);
+  if (score.is_complete !== wasComplete) {
+    setWasComplete(score.is_complete);
+    setPulse(score.is_complete);
+  }
+
   if (score.is_empty) {
     return (
       <section className="surface fade-in px-5 py-6 text-center" aria-label="Daily score">
@@ -65,7 +75,7 @@ export function ScoreCard({ score }: ScoreCardProps): ReactElement {
 
   return (
     <section
-      className={`surface fade-in ${complete ? 'pulse-once' : ''} px-5 py-5`}
+      className={`surface fade-in ${pulse ? 'pulse-once' : ''} px-5 py-5`}
       aria-label="Daily score"
     >
       <div className="flex items-baseline justify-between gap-3">
