@@ -149,6 +149,68 @@ def test_update_task_title_points(client):
     assert data["title"] == "Updated Title"
     assert data["points"] == 50
 
+
+def _make_missed_task(client):
+    task = client.post(
+        "/api/tasks/",
+        json={
+            "title": "Missed task",
+            "planned_date": (date.today() - timedelta(days=1)).isoformat(),
+        },
+    ).json()
+    assert client.post("/api/carry-over/").status_code == 200
+    return task
+
+
+def test_missed_task_accepts_miss_reason_patch(client):
+    task = _make_missed_task(client)
+    response = client.patch(
+        f"/api/tasks/{task['id']}", json={"miss_reason": "tired"}
+    )
+    assert response.status_code == 200
+    assert response.json()["miss_reason"] == "tired"
+
+
+def test_missed_task_rejects_other_patch_fields(client):
+    task = _make_missed_task(client)
+    response = client.patch(f"/api/tasks/{task['id']}", json={"title": "Changed"})
+    assert response.status_code == 409
+
+
+def test_missed_task_rejects_invalid_miss_reason(client):
+    task = _make_missed_task(client)
+    response = client.patch(
+        f"/api/tasks/{task['id']}", json={"miss_reason": "not-a-reason"}
+    )
+    assert response.status_code == 422
+
+
+def test_missed_task_miss_reason_can_be_cleared(client):
+    task = _make_missed_task(client)
+    client.patch(f"/api/tasks/{task['id']}", json={"miss_reason": "other"})
+    response = client.patch(f"/api/tasks/{task['id']}", json={"miss_reason": None})
+    assert response.status_code == 200
+    assert response.json()["miss_reason"] is None
+
+
+def test_missed_task_reason_can_be_edited_on_a_locked_day(client):
+    task = client.post(
+        "/api/tasks/",
+        json={
+            "title": "Locked missed task",
+            "planned_date": (date.today() - timedelta(days=1)).isoformat(),
+        },
+    ).json()
+    planned_date = (date.today() - timedelta(days=1)).isoformat()
+    assert client.patch(f"/api/days/{planned_date}", json={"locked": True}).status_code == 200
+    assert client.post("/api/carry-over/").status_code == 200
+    response = client.patch(
+        f"/api/tasks/{task['id']}", json={"miss_reason": "no_time"}
+    )
+    assert response.status_code == 200
+    assert response.json()["miss_reason"] == "no_time"
+
+
 @freeze_time("2026-10-01 22:30:00")
 def test_completed_date_cairo(client):
     """Verify completed_date uses the Cairo date (22:30 UTC is already the next day in Cairo)."""

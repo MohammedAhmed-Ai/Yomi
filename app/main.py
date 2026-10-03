@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import os
 from app.db import engine, Base
+from app.config import get_settings
 from app.routers import carry_over, days, tasks, tags, stats
 
 # Create all tables
@@ -12,7 +12,7 @@ app = FastAPI(title="Yomi API", version="1.0.0")
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173").split(","),
+    allow_origins=get_settings().cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

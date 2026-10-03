@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from datetime import date
 
 from app.db import get_db
 from app.models import Day, Task, utcnow
 from app.schemas import DayOut, DayScore, DayUpdate
 from app.scoring import score_day_tasks
+from app.task_queries import active_tasks, active_task_conditions
 
 router = APIRouter(prefix="/days", tags=["days"])
 
@@ -36,9 +37,8 @@ def day_tasks(db: Session, target_date: date) -> list:
     Soft-deleted tasks (and their subtasks) are excluded from the daily view."""
     return list(
         db.execute(
-            select(Task)
+            active_tasks(Task.planned_date == target_date)
             .options(selectinload(Task.subtasks))
-            .where(Task.planned_date == target_date, Task.status != "deleted")
             .order_by(Task.sort_order, Task.id)
         ).scalars().all()
     )
@@ -106,16 +106,23 @@ def get_day_score(date_str: str, db: Session = Depends(get_db)):
     """
     target_date = parse_date(date_str)
 
-    live = (Task.planned_date == target_date, Task.status != "deleted")
     roots = db.execute(
-        select(Task).where(*live, Task.parent_task_id.is_(None))
+        active_tasks(
+            Task.planned_date == target_date,
+            Task.parent_task_id.is_(None),
+        )
     ).scalars().all()
 
     subtasks_total, subtasks_done = db.execute(
         select(
             func.count(Task.id),
             func.count(Task.id).filter(Task.completed_date == target_date),
-        ).where(*live, Task.parent_task_id.isnot(None))
+        ).where(
+            *active_task_conditions(
+                Task.planned_date == target_date,
+                Task.parent_task_id.isnot(None),
+            )
+        )
     ).one()
 
     score = score_day_tasks(target_date, roots)

@@ -112,3 +112,20 @@ def test_stats_range_does_not_create_day_rows(client, db_session):
     )
     assert response.status_code == 200
     assert db_session.query(Day).count() == 0
+
+
+def test_deleted_task_is_excluded_from_day_score_and_range(client):
+    target_date = date.today()
+    task = client.post(
+        "/api/tasks/",
+        json={"title": "Deleted", "planned_date": target_date.isoformat()},
+    ).json()
+    assert client.delete(f"/api/tasks/{task['id']}").status_code == 204
+
+    day = target_date.isoformat()
+    assert client.get(f"/api/days/{day}").json()["tasks"] == []
+    assert client.get(f"/api/days/{day}/score").json()["tasks_total"] == 0
+    range_day = client.get(
+        f"/api/stats/range?start={day}&end={day}"
+    ).json()["days"][0]
+    assert range_day["tasks_total"] == 0

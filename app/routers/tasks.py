@@ -1,12 +1,22 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Any
+
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    HTTPException,
+    status,
+)
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import select
 from datetime import date
 from typing import List, Optional
 
 from app.db import get_db
 from app.models import Day, Task, utcnow
 from app.schemas import TaskCreate, TaskUpdate, TaskOut
+from app.task_queries import active_tasks, get_active_task
 from app.time_utils import local_date
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -26,8 +36,8 @@ def assert_day_unlocked(db: Session, task: Task) -> None:
 
 def get_task_or_404(db: Session, task_id: int) -> Task:
     """Fetch a live task. Soft-deleted tasks are treated as gone."""
-    task = db.get(Task, task_id)
-    if not task or task.is_deleted:
+    task = get_active_task(db, task_id)
+    if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
@@ -54,8 +64,8 @@ def get_writable_task(db: Session, task_id: int) -> Task:
 def create_task(task_in: TaskCreate, db: Session = Depends(get_db)):
     # Subtask constraints: Limited to 1 level deep
     if task_in.parent_task_id:
-        parent = db.get(Task, task_in.parent_task_id)
-        if not parent or parent.is_deleted:
+        parent = get_active_task(db, task_in.parent_task_id)
+        if not parent:
             raise HTTPException(status_code=404, detail="Parent task not found")
         if parent.parent_task_id:
             raise HTTPException(
@@ -121,9 +131,29 @@ def uncomplete_task(task_id: int, db: Session = Depends(get_db)):
 
 
 @router.patch("/{task_id}", response_model=TaskOut)
-def update_task(task_id: int, task_in: TaskUpdate, db: Session = Depends(get_db)):
-    db_task = get_writable_task(db, task_id)
-    assert_day_unlocked(db, db_task)
+def update_task(
+    task_id: int,
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+):
+    db_task = get_task_or_404(db, task_id)
+
+    if db_task.status == "missed" and set(payload) != {"miss_reason"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Task {task_id} was missed and is read-only. "
+                "Only its miss reason can be changed."
+            ),
+        )
+
+    if db_task.status != "missed":
+        assert_day_unlocked(db, db_task)
+
+    try:
+        task_in = TaskUpdate.model_validate(payload)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors(), body=payload) from exc
 
     update_data = task_in.model_dump(exclude_unset=True)
 
@@ -158,9 +188,8 @@ def list_tasks(
     db: Session = Depends(get_db),
 ):
     query = (
-        select(Task)
+        active_tasks()
         .options(selectinload(Task.subtasks))
-        .where(Task.status != "deleted")
         .order_by(Task.sort_order, Task.id)
     )
     if planned_date:

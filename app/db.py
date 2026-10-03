@@ -1,19 +1,28 @@
-from sqlalchemy import create_engine
+import sqlite3
+
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
-import os
-from pathlib import Path
 
 from app.models import Base
+from app.config import DB_PATH, get_settings
 
 __all__ = ["Base", "engine", "SessionLocal", "get_db", "DATABASE_URL", "DB_PATH"]
 
-# One database for the whole project, addressed absolutely. A relative
-# "sqlite:///./yomi.db" would silently follow the working directory, so running
-# Alembic from yomi/backend and the server from the repo root would end up with
-# two separate files.
-DB_PATH = Path(__file__).resolve().parent.parent / "yomi.db"
+DATABASE_URL = get_settings().database_url
 
-DATABASE_URL = os.getenv("DATABASE_URL") or f"sqlite:///{DB_PATH.as_posix()}"
+
+@event.listens_for(Engine, "connect")
+def configure_sqlite_connection(dbapi_connection, connection_record):
+    if not isinstance(dbapi_connection, sqlite3.Connection):
+        return
+
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.close()
+
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

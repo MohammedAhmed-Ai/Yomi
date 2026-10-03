@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 from datetime import date, datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 # --- Tags ---
 
@@ -39,12 +39,17 @@ class TaskUpdate(BaseModel):
     notes: Optional[str] = None
     points: Optional[int] = Field(None, ge=0, le=1000)
     priority: Optional[int] = Field(None, ge=0, le=3)
-    miss_reason: Optional[str] = None
+    miss_reason: Optional[Literal[
+        "tired", "no_time", "forgot", "too_big", "emergency", "other"
+    ]] = None
     sort_order: Optional[int] = None
 
 class TaskOut(TaskBase):
     id: int
     status: str
+    miss_reason: Optional[Literal[
+        "tired", "no_time", "forgot", "too_big", "emergency", "other"
+    ]] = None
     completed_at: Optional[datetime] = None
     completed_date: Optional[date] = None
     carry_count: int
@@ -94,7 +99,7 @@ class DayUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reflection: Optional[str] = Field(None, max_length=10000)
-    mood: Optional[int] = Field(None, ge=1, le=10)
+    mood: Optional[int] = Field(None, ge=1, le=5)
     locked: Optional[bool] = None
 
 class DayScore(BaseModel):

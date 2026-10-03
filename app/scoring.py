@@ -3,6 +3,7 @@ from datetime import date
 from collections.abc import Sequence
 
 from app.models import Task
+from app.task_queries import is_active_task
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,7 @@ class DayTaskScore:
 
 
 def score_day_tasks(target_date: date, roots: Sequence[Task]) -> DayTaskScore:
+    roots = [task for task in roots if is_active_task(task)]
     done = [
         task for task in roots
         if task.status == "done" and task.completed_date == target_date

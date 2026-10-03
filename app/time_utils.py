@@ -5,15 +5,14 @@ date a task belongs to depends on the user's timezone, not the server's.
 """
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
-import os
 
-DEFAULT_TIMEZONE = "Africa/Cairo"
+from app.config import get_settings
 
 
 def configured_timezone() -> ZoneInfo:
     """The user's timezone, falling back to UTC if the name is unknown."""
     try:
-        return ZoneInfo(os.getenv("TIMEZONE", DEFAULT_TIMEZONE))
+        return ZoneInfo(get_settings().timezone)
     except Exception:
         return ZoneInfo("UTC")
 
