@@ -1,4 +1,4 @@
-﻿@import 'tailwindcss';
+@import 'tailwindcss';
 @import './styles/theme.css';
 
 html,
@@ -111,6 +111,37 @@ body {
   color: var(--color-muted);
   text-decoration-line: line-through;
   text-decoration-color: var(--color-muted);
+}
+
+/* Day-to-day navigation: a short horizontal drift in the direction of travel. */
+.slide-forward {
+  animation: slide-in-forward var(--dur) var(--ease) both;
+}
+
+.slide-back {
+  animation: slide-in-back var(--dur) var(--ease) both;
+}
+
+@keyframes slide-in-forward {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-in-back {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 /* Deleting: fade out and collapse to nothing, measured per row via --exit-height. */
