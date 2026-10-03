@@ -90,16 +90,24 @@ body {
 
 /* --- Task row interaction --- */
 
-/* The circle fills rather than snapping: colours and a touch of scale. */
-.task-circle {
-  transition:
-    background-color var(--dur) var(--ease),
-    border-color var(--dur) var(--ease),
-    transform var(--dur-fast) var(--ease);
+.task-circle::before {
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background-color: var(--color-success);
+  content: '';
+  transform: scale(0);
+  transition: transform var(--dur) var(--ease);
+}
+
+.task-circle[data-done='true']::before {
+  transform: scale(1);
 }
 
 /* The tick fades in with the fill. */
 .task-check {
+  position: relative;
+  z-index: 1;
   opacity: 0;
   transition: opacity var(--dur) var(--ease);
 }
@@ -108,19 +116,50 @@ body {
   opacity: 1;
 }
 
-/* The strike-through grows in via text-decoration-color, so it fades softly. */
+/* A scaled pseudo-element draws the strike from the start of the title. */
 .task-title {
-  text-decoration-line: none;
-  text-decoration-color: transparent;
-  transition:
-    color var(--dur) var(--ease),
-    text-decoration-color var(--dur) var(--ease);
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  text-decoration: none;
 }
 
-.task-title[data-done='true'] {
+.task-title-base {
+  transition: opacity var(--dur) var(--ease);
+}
+
+.task-title-muted {
+  position: absolute;
+  inset: 0;
   color: var(--color-muted);
-  text-decoration-line: line-through;
-  text-decoration-color: var(--color-muted);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur) var(--ease);
+}
+
+.task-title[data-done='true'] .task-title-base {
+  opacity: 0;
+}
+
+.task-title[data-done='true'] .task-title-muted {
+  opacity: 1;
+}
+
+.task-title::after {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background-color: var(--color-muted);
+  content: '';
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--dur) var(--ease);
+}
+
+.task-title[data-done='true']::after {
+  transform: scaleX(1);
 }
 
 .dark .task-title[data-done='true'],
@@ -128,8 +167,12 @@ body {
   color: #c4c0bc;
 }
 
-.dark .task-title[data-done='true'] {
-  text-decoration-color: #c4c0bc;
+.dark .task-title[data-done='true'] .task-title-muted {
+  color: #c4c0bc;
+}
+
+.dark .task-title::after {
+  background-color: #c4c0bc;
 }
 
 /* Day-to-day navigation: a short horizontal drift in the direction of travel. */
@@ -177,11 +220,55 @@ body {
   }
 }
 
-/* Deleting: fade out and collapse to nothing, measured per row via --exit-height. */
-.task-exit {
+.task-edit-stack {
+  display: grid;
+}
+
+.task-edit-layer {
+  grid-area: 1 / 1;
+  opacity: 1;
+  transition: opacity 150ms var(--ease);
+}
+
+.task-edit-layer-hidden,
+.task-edit-side-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.task-slot {
+  grid-template-rows: 1fr;
   overflow: hidden;
-  animation:
-    task-exit 220ms var(--ease) forwards;
+}
+
+.task-slot-exiting,
+.task-slot-collapsing {
+  pointer-events: none;
+}
+
+.task-slot-exiting > .task-slot-content {
+  animation: task-delete-content 300ms var(--ease) forwards;
+}
+
+.task-slot-collapsing {
+  animation: task-space-collapse 250ms var(--ease) forwards;
+}
+
+.task-slot-restoring {
+  animation: task-space-restore 250ms var(--ease) both;
+}
+
+.task-slot-restoring > .task-slot-content {
+  animation: task-content-restore 300ms var(--ease) both;
+}
+
+.task-slot-entering {
+  animation: task-space-open 250ms var(--ease) both;
+}
+
+.task-add-content {
+  opacity: 0;
+  animation: task-add-content 250ms var(--ease) 250ms both;
 }
 
 .nudge-toast-slot {
@@ -314,16 +401,62 @@ body {
   }
 }
 
-@keyframes task-exit {
-  from {
-    opacity: 1;
-    max-height: var(--exit-height, 12rem);
-  }
+@keyframes task-delete-content {
   to {
     opacity: 0;
-    max-height: 0;
-    padding-top: 0;
-    padding-bottom: 0;
+    transform: translateX(8px);
+    filter: blur(2px);
+  }
+}
+
+@keyframes task-space-collapse {
+  from {
+    grid-template-rows: 1fr;
+  }
+  to {
+    grid-template-rows: 0fr;
+  }
+}
+
+@keyframes task-space-restore {
+  from {
+    grid-template-rows: 0fr;
+  }
+  to {
+    grid-template-rows: 1fr;
+  }
+}
+
+@keyframes task-space-open {
+  from {
+    grid-template-rows: 0fr;
+  }
+  to {
+    grid-template-rows: 1fr;
+  }
+}
+
+@keyframes task-content-restore {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes task-add-content {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -376,6 +509,67 @@ body {
 
   .nudge-toast-copy-change {
     animation: nudge-toast-reduced-enter 150ms ease-out both !important;
+  }
+
+  .task-circle,
+  .task-title {
+    transition: none !important;
+  }
+
+  .task-circle::before {
+    transition: none !important;
+  }
+
+  .task-title-base,
+  .task-title-muted,
+  .task-check {
+    transition-duration: 150ms !important;
+  }
+
+  .task-title::after {
+    transition: none !important;
+  }
+
+  .task-edit-layer {
+    transition-duration: 150ms !important;
+  }
+
+  .task-slot-entering,
+  .task-slot-restoring {
+    grid-template-rows: 1fr !important;
+    animation: task-reduced-fade 150ms ease-out both !important;
+  }
+
+  .task-slot-exiting > .task-slot-content {
+    animation: task-reduced-exit 150ms ease-out both !important;
+  }
+
+  .task-slot-collapsing {
+    grid-template-rows: 0fr !important;
+    animation: none !important;
+  }
+
+  .task-add-content,
+  .task-slot-restoring > .task-slot-content {
+    animation: none !important;
+  }
+}
+
+@keyframes task-reduced-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes task-reduced-exit {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
   }
 }
 

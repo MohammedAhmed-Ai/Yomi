@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactElement } from 'react';
 import {
   carryOver,
@@ -164,8 +164,36 @@ function removeTask(tasks: Day['tasks'], id: number): Day['tasks'] {
     );
 }
 
+function restoreTask(tasks: Day['tasks'], task: Task): Day['tasks'] {
+  const insertInOrder = (siblings: Task[]): Task[] => {
+    const index = siblings.findIndex((sibling) => sibling.sort_order > task.sort_order);
+    const restored = [...siblings];
+    restored.splice(index === -1 ? restored.length : index, 0, task);
+    return restored;
+  };
+
+  if (task.parent_task_id === null) return insertInOrder(tasks);
+
+  return tasks.map((sibling) => {
+    if (sibling.id === task.parent_task_id) {
+      return { ...sibling, subtasks: insertInOrder(sibling.subtasks) };
+    }
+    if (sibling.subtasks.length === 0) return sibling;
+    return { ...sibling, subtasks: restoreTask(sibling.subtasks, task) };
+  });
+}
+
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
+}
+
+type DeletePhase = 'exiting' | 'collapsing' | 'restoring';
+
+interface DeleteOperation {
+  task: Task;
+  date: string;
+  exited: boolean;
+  succeeded: boolean;
 }
 
 export function TodayPage(): ReactElement {
@@ -186,7 +214,11 @@ export function TodayPage(): ReactElement {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [actionError, setActionError] = useState('');
   const [justAdded, setJustAdded] = useState<number | null>(null);
-  const [removing, setRemoving] = useState<Record<number, boolean>>({});
+  const [removing, setRemoving] = useState<Record<number, DeletePhase>>({});
+  const deleteOperations = useRef(new Map<number, DeleteOperation>());
+  const taskListRef = useRef<HTMLUListElement | null>(null);
+  const previousTaskPositions = useRef(new Map<number, number>());
+  const previousTaskOrder = useRef<number[]>([]);
 
   // Compared against the hash so browser back/forward slides the right way too.
   const dateRef = useRef(date);
@@ -198,6 +230,46 @@ export function TodayPage(): ReactElement {
   const [enterDirection, setEnterDirection] = useState<Direction>('none');
   // The previous "today", so a rollover can tell which day was on screen.
   const previousTodayRef = useRef(today);
+
+  useLayoutEffect(() => {
+    const rows = Array.from(
+      taskListRef.current?.querySelectorAll<HTMLLIElement>(':scope > li[data-task-id]') ?? [],
+    );
+    const order = rows.map((row) => Number(row.dataset.taskId));
+    const sameTasks =
+      order.length === previousTaskOrder.current.length &&
+      order.every((id) => previousTaskPositions.current.has(id));
+    const reordered =
+      sameTasks && order.some((id, index) => id !== previousTaskOrder.current[index]);
+
+    if (reordered) {
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      rows.forEach((row) => {
+        const id = Number(row.dataset.taskId);
+        const top = row.offsetTop;
+        const previousTop = previousTaskPositions.current.get(id);
+        if (previousTop === undefined || Math.abs(previousTop - top) < 1) return;
+
+        row.animate(
+          reducedMotion
+            ? [{ opacity: 0.65 }, { opacity: 1 }]
+            : [
+                { transform: `translateY(${previousTop - top}px)` },
+                { transform: 'translateY(0)' },
+              ],
+          {
+            duration: reducedMotion ? 150 : 300,
+            easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+          },
+        );
+      });
+    }
+
+    previousTaskOrder.current = order;
+    previousTaskPositions.current = new Map(
+      rows.map((row) => [Number(row.dataset.taskId), row.offsetTop]),
+    );
+  });
 
   useEffect(() => {
     const onHashChange = (): void => {
@@ -403,43 +475,78 @@ export function TodayPage(): ReactElement {
     }
   };
 
-  /** Marks the row as leaving; TaskItem calls handleDelete once it has collapsed. */
   const handleDeleteRequest = (task: Task): void => {
-    if (removing[task.id]) return;
+    if (deleteOperations.current.has(task.id)) return;
     setActionError('');
-    setRemoving((current) => ({ ...current, [task.id]: true }));
+    setRemoving((current) => ({ ...current, [task.id]: 'exiting' }));
+    const operation: DeleteOperation = { task, date, exited: false, succeeded: false };
+    deleteOperations.current.set(task.id, operation);
+
+    void (async (): Promise<void> => {
+      try {
+        await deleteTask(task.id);
+        operation.succeeded = true;
+        if (operation.exited) deleteOperations.current.delete(task.id);
+        try {
+          const freshScore = await getScore(operation.date);
+          setLoaded((current) =>
+            current?.date === operation.date ? { ...current, score: freshScore } : current,
+          );
+        } catch (error: unknown) {
+          if (dateRef.current === operation.date) {
+            setActionError(errorMessage(error, 'Could not refresh the score.'));
+          }
+        }
+      } catch (error: unknown) {
+        deleteOperations.current.delete(task.id);
+        if (dateRef.current === operation.date) {
+          if (operation.exited) {
+            setLoaded((current) =>
+              current?.date === operation.date
+                ? {
+                    ...current,
+                    day: { ...current.day, tasks: restoreTask(current.day.tasks, task) },
+                  }
+                : current,
+            );
+          }
+          setRemoving((current) => ({ ...current, [task.id]: 'restoring' }));
+          setActionError(errorMessage(error, 'Could not delete that task.'));
+        }
+      }
+    })();
   };
 
-  const clearRemoving = (id: number): void => {
+  const handleDeleteCollapse = (task: Task): void => {
+    setRemoving((current) =>
+      current[task.id] === 'exiting' ? { ...current, [task.id]: 'collapsing' } : current,
+    );
+  };
+
+  const handleDeleteAnimationEnd = (task: Task, phase: 'exiting' | 'restoring'): void => {
+    if (phase === 'restoring') {
+      setRemoving((current) => {
+        const next = { ...current };
+        delete next[task.id];
+        return next;
+      });
+      return;
+    }
+
+    const operation = deleteOperations.current.get(task.id);
+    if (!operation) return;
+    operation.exited = true;
+    setLoaded((current) =>
+      current?.date === operation.date
+        ? { ...current, day: { ...current.day, tasks: removeTask(current.day.tasks, task.id) } }
+        : current,
+    );
     setRemoving((current) => {
-      if (!current[id]) return current;
       const next = { ...current };
-      delete next[id];
+      delete next[task.id];
       return next;
     });
-  };
-
-  const handleDelete = async (task: Task): Promise<void> => {
-    setBusyId(task.id);
-    try {
-      await deleteTask(task.id);
-      const freshScore = await getScore(date);
-      setLoaded((current) =>
-        current
-          ? {
-              ...current,
-              day: { ...current.day, tasks: removeTask(current.day.tasks, task.id) },
-              score: freshScore,
-            }
-          : current,
-      );
-    } catch (error: unknown) {
-      // Bring the row back and explain why it stayed.
-      setActionError(errorMessage(error, 'Could not delete that task.'));
-    } finally {
-      clearRemoving(task.id);
-      setBusyId(null);
-    }
+    if (operation.succeeded) deleteOperations.current.delete(task.id);
   };
 
   const isToday = date === today;
@@ -636,10 +743,11 @@ export function TodayPage(): ReactElement {
           <div className="mt-4 min-h-[140px]">
             {tasks.length > 0 && (
               <div key={loaded.date} className={`surface px-4 py-1 ${isStale ? '' : slideClass}`}>
-                <ul className="m-0 list-none p-0">
+                <ul ref={taskListRef} className="m-0 list-none p-0">
                   {tasks.map((task, index) => (
                     <li
                       key={task.id}
+                      data-task-id={task.id}
                       className={removing[task.id] ? '' : 'border-b border-border last:border-b-0'}
                     >
                       <TaskItem
@@ -651,11 +759,12 @@ export function TodayPage(): ReactElement {
                             : undefined
                         }
                         entering={task.id === justAdded}
-                        exiting={removing[task.id] ?? false}
+                        exitPhaseForTask={(id) => removing[id]}
                         onToggle={canComplete ? (target) => void handleToggle(target) : undefined}
                         onSave={readOnly ? undefined : handleSave}
                         onDeleteRequest={readOnly ? undefined : handleDeleteRequest}
-                        onDelete={readOnly ? undefined : (target) => void handleDelete(target)}
+                        onDeleteCollapse={handleDeleteCollapse}
+                        onDeleteAnimationEnd={handleDeleteAnimationEnd}
                         busy={busyId === task.id}
                       />
                     </li>
