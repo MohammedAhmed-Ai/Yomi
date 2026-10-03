@@ -268,7 +268,9 @@ export function TaskItem({
       </div>
 
       {!editing && (
-        <span className="shrink-0 text-xs text-muted tabular-nums">{task.points}</span>
+        <span className="task-points shrink-0 text-xs text-muted tabular-nums" data-done={done}>
+          {task.points}
+        </span>
       )}
 
       {!editing && mutable && (

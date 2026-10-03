@@ -497,21 +497,24 @@ export function TodayPage(): ReactElement {
                 <label htmlFor="new-task-points" className="sr-only">
                   Points
                 </label>
-                <input
-                  id="new-task-points"
-                  type="number"
-                  min={0}
-                  max={1000}
-                  value={points}
-                  onChange={(event) => setPoints(Number(event.target.value))}
-                  disabled={adding}
-                  className="w-16 rounded-[12px] border border-border bg-background px-2 py-1.5 text-sm text-text tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60"
-                />
+                <div className="flex items-center gap-1">
+                  <input
+                    id="new-task-points"
+                    type="number"
+                    min={0}
+                    max={1000}
+                    value={points}
+                    onChange={(event) => setPoints(Number(event.target.value))}
+                    disabled={adding}
+                    className="w-16 rounded-[12px] border border-border bg-background px-2 py-1.5 text-sm text-text tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60"
+                  />
+                  <span className="text-xs text-muted">pts</span>
+                </div>
 
                 <button
                   type="submit"
                   disabled={!canAdd}
-                  className={`press rounded-[12px] border border-primary bg-primary px-3 py-1.5 text-sm font-medium text-primary-contrast ${focusRing} disabled:opacity-40`}
+                  className={`add-task-button press rounded-[12px] border border-primary bg-primary px-3 py-1.5 text-sm font-medium text-white ${focusRing} disabled:opacity-40`}
                 >
                   {adding ? 'Adding…' : 'Add'}
                 </button>
@@ -531,7 +534,7 @@ export function TodayPage(): ReactElement {
             </p>
           )}
 
-          <div className="mt-3 min-h-[140px]">
+          <div className="mt-4 min-h-[140px]">
             {tasks.length > 0 && (
               <div key={loaded.date} className={`surface px-4 py-1 ${isStale ? '' : slideClass}`}>
                 <ul className="m-0 list-none p-0">
