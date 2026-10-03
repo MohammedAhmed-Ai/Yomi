@@ -7,10 +7,15 @@ import './index.css';
 
 function App() {
   const today = useToday();
-  const [showHistory, setShowHistory] = useState(() => window.location.hash === '#/history');
+  const [showHistory, setShowHistory] = useState(() =>
+    window.location.hash === '#/history' || window.location.hash.startsWith('#/history/'),
+  );
 
   useEffect(() => {
-    const onHashChange = (): void => setShowHistory(window.location.hash === '#/history');
+    const onHashChange = (): void =>
+      setShowHistory(
+        window.location.hash === '#/history' || window.location.hash.startsWith('#/history/'),
+      );
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
