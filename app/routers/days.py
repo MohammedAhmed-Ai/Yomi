@@ -6,6 +6,7 @@ from datetime import date
 from app.db import get_db
 from app.models import Day, Task, utcnow
 from app.schemas import DayOut, DayScore, DayUpdate
+from app.scoring import score_day_tasks
 
 router = APIRouter(prefix="/days", tags=["days"])
 
@@ -117,20 +118,17 @@ def get_day_score(date_str: str, db: Session = Depends(get_db)):
         ).where(*live, Task.parent_task_id.isnot(None))
     ).one()
 
-    done = [t for t in roots if t.status == "done" and t.completed_date == target_date]
-    total_points = sum(t.points or 0 for t in roots)
-    earned_points = sum(t.points or 0 for t in done)
-    is_complete = bool(roots) and len(done) == len(roots)
+    score = score_day_tasks(target_date, roots)
 
     return DayScore(
         date=target_date,
-        is_empty=not roots,
-        is_complete=is_complete,
-        tasks_total=len(roots),
-        tasks_done=len(done),
+        is_empty=score.is_empty,
+        is_complete=score.is_complete,
+        tasks_total=score.tasks_total,
+        tasks_done=score.tasks_done,
         subtasks_total=subtasks_total,
         subtasks_done=subtasks_done,
-        total_points=total_points,
-        earned_points=earned_points,
-        score=total_points if is_complete else 0,
+        total_points=score.total_points,
+        earned_points=score.earned_points,
+        score=score.score,
     )

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from app.db import engine, Base
-from app.routers import carry_over, days, tasks, tags
+from app.routers import carry_over, days, tasks, tags, stats
 
 # Create all tables
 Base.metadata.create_all(bind=engine)
@@ -28,3 +28,4 @@ app.include_router(carry_over.router, prefix="/api")
 app.include_router(days.router, prefix="/api")
 app.include_router(tasks.router, prefix="/api")
 app.include_router(tags.router, prefix="/api")
+app.include_router(stats.router, prefix="/api")
