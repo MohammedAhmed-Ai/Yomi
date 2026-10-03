@@ -9,17 +9,14 @@ import {
   completeTask,
   uncompleteTask,
   deleteTask,
-  updateMissReason,
   ApiError,
 } from '../lib/api';
 import { addDays, todayISO } from '../lib/dates';
 import { useToday } from '../lib/useToday';
-import type { Day, DayScore, MissReason, Task } from '../lib/types';
+import type { Day, DayScore, Task } from '../lib/types';
 import { plural } from '../lib/text';
 import { ScoreCard } from '../components/ScoreCard';
 import { TaskItem } from '../components/TaskItem';
-import { DayWrapUpCard } from '../components/DayWrapUpCard';
-import type { DayWrapUpHandle } from '../components/DayWrapUpCard';
 import { NudgeToast } from '../components/NudgeToast';
 import type { NudgeMessage } from '../components/NudgeToast';
 
@@ -227,8 +224,6 @@ export function TodayPage(): ReactElement {
   const deleteOperations = useRef(new Map<number, DeleteOperation>());
   const dayRequestId = useRef(0);
   const scoreRequestId = useRef(0);
-  const wrapUpRef = useRef<DayWrapUpHandle | null>(null);
-  const hashChangeRequestId = useRef(0);
   const taskListRef = useRef<HTMLUListElement | null>(null);
   const highlightFrame = useRef<number | undefined>(undefined);
   const [highlightedTaskId, setHighlightedTaskId] = useState<number | null>(null);
@@ -309,23 +304,10 @@ export function TodayPage(): ReactElement {
     const onHashChange = (): void => {
       const next = readHashDate();
       const previous = dateRef.current;
-      const requestId = ++hashChangeRequestId.current;
-      void (async () => {
-        const flushed = (await wrapUpRef.current?.flush()) ?? true;
-        if (requestId !== hashChangeRequestId.current) return;
-        if (!flushed) {
-          window.history.replaceState(
-            null,
-            '',
-            `${window.location.pathname}${window.location.search}#/${previous}`,
-          );
-          return;
-        }
-        directionRef.current = next > previous ? 'forward' : next < previous ? 'back' : 'none';
-        dateRef.current = next;
-        setNudge(null);
-        setDate(next);
-      })();
+      directionRef.current = next > previous ? 'forward' : next < previous ? 'back' : 'none';
+      dateRef.current = next;
+      setNudge(null);
+      setDate(next);
     };
 
     window.addEventListener('hashchange', onHashChange);
@@ -369,10 +351,7 @@ export function TodayPage(): ReactElement {
   const goTo = useCallback((next: string) => {
     const hash = `#/${next}`;
     if (window.location.hash === hash) return;
-    void (async () => {
-      const flushed = (await wrapUpRef.current?.flush()) ?? true;
-      if (flushed) window.location.hash = hash;
-    })();
+    window.location.hash = hash;
   }, []);
 
   const retry = (): void => setAttempt((value) => value + 1);
@@ -525,32 +504,6 @@ export function TodayPage(): ReactElement {
     } catch (error: unknown) {
       // Re-thrown so the row stays in edit mode with the message attached.
       throw new Error(errorMessage(error, 'Could not save that task.'));
-    }
-  };
-
-  const handleReasonChange = async (task: Task, reason: MissReason | null): Promise<void> => {
-    const originalId = task.status === 'missed' ? task.id : task.carried_from_id;
-    if (originalId === null) throw new Error('This task has no original task to update.');
-
-    try {
-      const updated = await updateMissReason(originalId, reason);
-      setLoaded((current) =>
-        current?.date === date
-          ? {
-              ...current,
-              day: {
-                ...current.day,
-                tasks: patchTask(current.day.tasks, task.id, (currentTask) =>
-                  currentTask.status === 'missed'
-                    ? { ...currentTask, miss_reason: updated.miss_reason }
-                    : { ...currentTask, source_miss_reason: updated.miss_reason },
-                ),
-              },
-            }
-          : current,
-      );
-    } catch (error: unknown) {
-      throw new Error(errorMessage(error, 'Could not save that reason.'));
     }
   };
 
@@ -892,11 +845,6 @@ export function TodayPage(): ReactElement {
                         entering={task.id === justAdded}
                         exitPhaseForTask={(id) => removing[id]}
                         onToggle={canComplete ? (target) => void handleToggle(target) : undefined}
-                        onReasonChange={handleReasonChange}
-                        allowReasonEdit={
-                          (isToday && task.status === 'pending' && task.carried_from_id !== null) ||
-                          (isPast && task.status === 'missed')
-                        }
                         onSave={readOnly ? undefined : handleSave}
                         onDeleteRequest={readOnly ? undefined : handleDeleteRequest}
                         onDeleteCollapse={handleDeleteCollapse}
@@ -909,10 +857,6 @@ export function TodayPage(): ReactElement {
               </div>
             )}
           </div>
-
-          {!isFuture && loaded.date === date && (
-            <DayWrapUpCard ref={wrapUpRef} key={day.date} day={day} isToday={isToday} />
-          )}
         </div>
       )}
     </div>
