@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AnimationEvent, KeyboardEvent, ReactElement } from 'react';
-import type { Task } from '../lib/types';
+import type { MissReason, Task } from '../lib/types';
 
 interface TaskEdit {
   title: string;
@@ -23,6 +23,8 @@ interface TaskItemProps {
   onToggle?: (task: Task) => void;
   /** Saves title and points. Rejects with the API message to stay in edit mode. */
   onSave?: (task: Task, edit: TaskEdit) => Promise<void>;
+  onReasonChange?: (task: Task, reason: MissReason | null) => Promise<void>;
+  allowReasonEdit?: boolean;
   /** Starts the exit animation. The page marks the row as exiting. */
   onDeleteRequest?: (task: Task) => void;
   /** Called between the delete fade and space-collapse stages. */
@@ -81,6 +83,8 @@ export function TaskItem({
   exitPhaseForTask,
   onToggle,
   onSave,
+  onReasonChange,
+  allowReasonEdit = false,
   onDeleteRequest,
   onDeleteCollapse,
   onDeleteAnimationEnd,
@@ -101,6 +105,9 @@ export function TaskItem({
   const [draftPoints, setDraftPoints] = useState(String(task.points));
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState('');
+  const [reasonExpanded, setReasonExpanded] = useState(false);
+  const [reasonBusy, setReasonBusy] = useState(false);
+  const [reasonError, setReasonError] = useState('');
   // Escape removes the inputs, which can fire blur; this keeps that from saving.
   const cancelled = useRef(false);
   const deleteAnimationHandlers = useRef({
@@ -269,6 +276,88 @@ export function TaskItem({
     </>
   );
 
+  const reasonOptions: { value: MissReason; label: string }[] = [
+    { value: 'tired', label: 'Tired' },
+    { value: 'no_time', label: 'No time' },
+    { value: 'forgot', label: 'Forgot' },
+    { value: 'too_big', label: 'Too big' },
+    { value: 'emergency', label: 'Emergency' },
+    { value: 'other', label: 'Other' },
+  ];
+  const selectedReason = missed ? task.miss_reason : task.source_miss_reason;
+  const showReason = allowReasonEdit && onReasonChange && (missed || (carried && !done));
+
+  const saveReason = async (reason: MissReason | null): Promise<void> => {
+    if (!onReasonChange || reasonBusy) return;
+    setReasonBusy(true);
+    setReasonError('');
+    try {
+      await onReasonChange(task, reason);
+      setReasonExpanded(false);
+    } catch (error: unknown) {
+      setReasonError(error instanceof Error ? error.message : 'Could not save that reason.');
+    } finally {
+      setReasonBusy(false);
+    }
+  };
+
+  const reasonControl = showReason ? (
+    <div className="mt-1">
+      {selectedReason && !reasonExpanded ? (
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-[10px] text-muted">
+          {reasonOptions.find((option) => option.value === selectedReason)?.label ?? 'Reason'}
+          <button
+            type="button"
+            onClick={() => setReasonExpanded(true)}
+            className="rounded-sm underline underline-offset-2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            Change
+          </button>
+        </span>
+      ) : !reasonExpanded ? (
+        <button
+          type="button"
+          onClick={() => setReasonExpanded(true)}
+          className="rounded-sm text-[11px] text-muted underline decoration-border underline-offset-2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          Why did it slip?
+        </button>
+      ) : null}
+
+      <div
+        aria-hidden={!reasonExpanded}
+        inert={!reasonExpanded}
+        className={`grid transition-[grid-template-rows,opacity] duration-250 ease-[var(--ease)] motion-reduce:transition-none ${
+          reasonExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+        }`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="flex flex-wrap gap-1.5 py-1">
+            {reasonOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                disabled={reasonBusy}
+                aria-pressed={selectedReason === option.value}
+                onClick={() =>
+                  void saveReason(selectedReason === option.value ? null : option.value)
+                }
+                className="press rounded-full border border-border px-2 py-1 text-[10px] text-muted hover:border-primary hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60"
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          {reasonError && (
+            <p role="status" className="mb-1 text-[11px] text-danger">
+              {reasonError}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   const editor = (
     <div className="flex flex-wrap items-center gap-2 py-1">
       <label className="sr-only" htmlFor={`title-${task.id}`}>
@@ -361,6 +450,7 @@ export function TaskItem({
               {task.notes}
             </p>
           )}
+          {reasonControl}
           {editError && (
             <p className="mt-1 mb-0 text-xs text-danger" role="alert">
               {editError}
@@ -463,6 +553,8 @@ export function TaskItem({
                 nested
                 onToggle={onToggle}
                 onSave={onSave}
+                onReasonChange={onReasonChange}
+                allowReasonEdit={allowReasonEdit}
                 onDeleteRequest={onDeleteRequest}
                 onDeleteCollapse={onDeleteCollapse}
                 onDeleteAnimationEnd={onDeleteAnimationEnd}

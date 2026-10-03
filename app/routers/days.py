@@ -7,7 +7,11 @@ from app.db import get_db
 from app.models import Day, Task, utcnow
 from app.schemas import DayOut, DayScore, DayUpdate
 from app.scoring import score_day_tasks
-from app.task_queries import active_tasks, active_task_conditions
+from app.task_queries import (
+    active_tasks,
+    active_task_conditions,
+    load_source_miss_reasons,
+)
 
 router = APIRouter(prefix="/days", tags=["days"])
 
@@ -35,13 +39,14 @@ def get_or_create_day(db: Session, target_date: date) -> Day:
 def day_tasks(db: Session, target_date: date) -> list:
     """Tasks planned for the date, ordered by sort_order then id.
     Soft-deleted tasks (and their subtasks) are excluded from the daily view."""
-    return list(
+    tasks = list(
         db.execute(
             active_tasks(Task.planned_date == target_date)
             .options(selectinload(Task.subtasks))
             .order_by(Task.sort_order, Task.id)
         ).scalars().all()
     )
+    return load_source_miss_reasons(db, tasks)
 
 
 def day_response(db: Session, day: Day) -> DayOut:
