@@ -59,7 +59,7 @@ function useCountUp(target: number): number {
 }
 
 export function ScoreCard({ score }: ScoreCardProps): ReactElement {
-  const counted = useCountUp(score.score);
+  const counted = useCountUp(score.earned_points);
 
   // Pulse only on the transition into a complete day, not on first paint.
   // Adjusting state during render is React's documented pattern for reacting to
@@ -74,19 +74,19 @@ export function ScoreCard({ score }: ScoreCardProps): ReactElement {
   const percent =
     score.tasks_total > 0 ? Math.round((score.tasks_done / score.tasks_total) * 100) : 0;
   const complete = score.is_complete;
+  const dayScoreLine = complete
+    ? `Day score: ${score.score}`
+    : `Day score: ${score.score} · finish all tasks to earn ${score.total_points}`;
 
   return (
-    <section
-      className={`surface fade-in ${pulse ? 'pulse-once' : ''} px-5 py-5`}
-      aria-label="Daily score"
-    >
+    <section className="surface fade-in px-5 py-5" aria-label="Daily score">
       <div className="flex items-baseline justify-between gap-3">
         <p className="m-0">
           <span
-            className={`text-3xl font-semibold ${complete ? 'text-success' : 'text-text'}`}
+            className="text-3xl font-semibold text-text"
             style={{ fontVariantNumeric: 'tabular-nums' }}
           >
-            {counted}
+            {counted} / {score.total_points}
           </span>
           <span className="ml-1 text-sm text-muted">pts</span>
         </p>
@@ -97,6 +97,18 @@ export function ScoreCard({ score }: ScoreCardProps): ReactElement {
           {score.tasks_total === 1 ? 'task' : 'tasks'} done
         </p>
       </div>
+
+      <p
+        key={dayScoreLine}
+        onAnimationEnd={() => {
+          if (pulse) setPulse(false);
+        }}
+        className={`score-line-change mt-2 mb-0 text-xs ${
+          complete ? `text-success ${pulse ? 'pulse-once' : ''}` : 'text-muted'
+        }`}
+      >
+        {dayScoreLine}
+      </p>
 
       {score.is_empty && (
         <div className="mt-3 text-center">

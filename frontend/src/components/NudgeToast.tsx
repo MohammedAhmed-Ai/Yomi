@@ -61,7 +61,10 @@ export function NudgeToast({ message, onDismiss }: NudgeToastProps): ReactElemen
   if (!message) return null;
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-[max(1rem,env(safe-area-inset-bottom))] z-50 flex justify-center px-4">
+    <div
+      onAnimationEnd={handleAnimationEnd}
+      className={`nudge-toast-slot mt-3 grid ${visible ? 'nudge-toast-enter' : 'nudge-toast-exit'}`}
+    >
       <div
         role="status"
         aria-live="polite"
@@ -71,18 +74,13 @@ export function NudgeToast({ message, onDismiss }: NudgeToastProps): ReactElemen
         onBlurCapture={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
         }}
-        onAnimationEnd={handleAnimationEnd}
-        className={`pointer-events-auto w-full max-w-md rounded-2xl border border-border bg-surface px-4 py-3 text-text shadow-lg ${
-          visible ? 'nudge-toast-enter' : 'nudge-toast-exit'
-        }`}
+        className="nudge-toast-content min-h-0 overflow-hidden"
       >
-        <div className="nudge-toast-breathe">
+        <div className="surface px-4 py-3 text-text">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="m-0 text-sm font-semibold">{message.title}</p>
-              <p className="mt-1 mb-0 text-xs font-medium text-primary">
-                {message.stats}
-              </p>
+              <p className="mt-1 mb-0 text-xs font-medium text-primary">{message.stats}</p>
             </div>
             <button
               type="button"
