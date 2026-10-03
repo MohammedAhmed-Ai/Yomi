@@ -117,3 +117,24 @@ class DayScore(BaseModel):
     score: int
 
     model_config = ConfigDict(from_attributes=True)
+
+class StatsRangeDay(BaseModel):
+    date: date
+    tasks_total: int
+    tasks_done: int
+    total_points: int
+    earned_points: int
+    completion_pct: float
+    score: int
+    is_complete: bool
+    is_empty: bool
+
+class StatsRangeSummary(BaseModel):
+    days_complete: int
+    days_with_tasks: int
+    total_score: int
+    avg_completion_pct: float
+
+class StatsRangeOut(BaseModel):
+    days: List[StatsRangeDay]
+    summary: StatsRangeSummary
