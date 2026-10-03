@@ -35,19 +35,19 @@ interface FailedDay {
 
 const DEFAULT_POINTS = 10;
 const MOTIVATIONAL_LINES = [
-  "One task at a time. You've got this.",
-  'Small steps still count.',
-  'You are closer than you think.',
-  'A little progress goes a long way.',
-  'Keep going at your own pace.',
-  'Every finished task is a win.',
+  'Finish them all and the day is yours.',
+  'One task at a time.',
+  "The whole day's score is one finish line away.",
+  'Keep your focus on the finish line.',
+  'Clear every task to claim the full score.',
+  'Finish every task to unlock today’s points.',
 ];
 
 function chooseMotivation(previousIndex: number): { index: number; line: string } {
-  const availableCount = MOTIVATIONAL_LINES.length - 1;
-  const randomIndex = Math.floor(Math.random() * availableCount);
-  const index = randomIndex >= previousIndex ? randomIndex + 1 : randomIndex;
-  return { index, line: MOTIVATIONAL_LINES[index] };
+  const options = MOTIVATIONAL_LINES.map((line, index) => ({ index, line })).filter(
+    (option) => option.index !== previousIndex,
+  );
+  return options[Math.floor(Math.random() * options.length)];
 }
 
 function makeNudgeMessage(
@@ -595,6 +595,8 @@ export function TodayPage(): ReactElement {
             </div>
           )}
 
+          <NudgeToast message={nudge} onDismiss={dismissNudge} />
+
           {actionError && (
             <p className="mt-2 mb-0 text-xs text-danger" role="alert">
               {actionError}
@@ -629,7 +631,6 @@ export function TodayPage(): ReactElement {
           </div>
         </div>
       )}
-      <NudgeToast message={nudge} onDismiss={dismissNudge} />
     </div>
   );
 }
