@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import { getRange, ApiError } from '../lib/api';
 import { addDays, todayISO } from '../lib/dates';
 import { useToday } from '../lib/useToday';
+import { plural } from '../lib/text';
 import type { StatsRange } from '../lib/types';
 import { HistoryMonthView } from './HistoryMonthView';
 
@@ -242,7 +243,7 @@ function WeekHistoryView(): ReactElement {
                 <span className="font-semibold text-text">
                   {completedDays} of {daysWithTasks.length}
                 </span>{' '}
-                days complete
+                {plural(daysWithTasks.length, 'day', 'days')} complete
               </p>
               <p className="m-0 text-sm text-muted">
                 Total score{' '}

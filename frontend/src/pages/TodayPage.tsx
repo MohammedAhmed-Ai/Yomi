@@ -14,6 +14,7 @@ import {
 import { addDays, todayISO } from '../lib/dates';
 import { useToday } from '../lib/useToday';
 import type { Day, DayScore, Task } from '../lib/types';
+import { plural } from '../lib/text';
 import { ScoreCard } from '../components/ScoreCard';
 import { TaskItem } from '../components/TaskItem';
 import { NudgeToast } from '../components/NudgeToast';
@@ -77,10 +78,9 @@ function makeNudgeMessage(
     const weekday = new Date(year, month - 1, day).toLocaleDateString('en-GB', {
       weekday: 'long',
     });
-    const totalTaskLabel = score.tasks_total === 1 ? 'task' : 'tasks';
     return {
       title: 'Planning ahead',
-      detail: `Planned for ${weekday}. Complete all ${score.tasks_total} ${totalTaskLabel} that day to earn ${score.total_points} pts.`,
+      detail: `Planned for ${weekday}. Complete all ${score.tasks_total} ${plural(score.tasks_total, 'task', 'tasks')} that day to earn ${score.total_points} pts.`,
       motivation,
     };
   }
@@ -804,7 +804,7 @@ export function TodayPage(): ReactElement {
                         index={index}
                         lastTaskHint={
                           task.id === lastTaskId && score
-                            ? `Last one. Finish it to earn the full ${score.total_points} pts.`
+                            ? `${pendingTasks.length} ${plural(pendingTasks.length, 'task', 'tasks')} left. Finish it to earn the full ${score.total_points} pts.`
                             : undefined
                         }
                         entering={task.id === justAdded}

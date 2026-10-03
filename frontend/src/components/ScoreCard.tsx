@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { DayScore } from '../lib/types';
+import { plural } from '../lib/text';
 import { NudgeToast } from './NudgeToast';
 import type { NudgeMessage } from './NudgeToast';
 
@@ -94,7 +95,7 @@ export function ScoreCard({
             title: 'How the day score works',
             detail: complete
               ? `Day complete. ${score.total_points} pts earned.`
-              : `Finish every task today to earn the full ${score.total_points} pts. ${pendingTaskCount} tasks left.`,
+              : `Finish every task today to earn the full ${score.total_points} pts. ${pendingTaskCount} ${plural(pendingTaskCount, 'task', 'tasks')} left.`,
           }
         : null,
     [complete, helpOpen, pendingTaskCount, score.total_points],
@@ -116,7 +117,7 @@ export function ScoreCard({
           <span className={complete ? 'text-success' : undefined}>{percent}%</span>
           {' · '}
           {score.tasks_done} of {score.tasks_total}{' '}
-          {score.tasks_total === 1 ? 'task' : 'tasks'} done
+          {plural(score.tasks_total, 'task', 'tasks')} done
         </p>
       </div>
 
