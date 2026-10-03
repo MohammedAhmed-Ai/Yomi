@@ -181,9 +181,14 @@ body {
     scroll-behavior: auto !important;
   }
 
-  /* Day transitions keep a brief fade, but lose the horizontal slide. */
+  /* Entrances keep a brief fade, but lose sliding and stagger delays. */
+  .fade-in,
   .slide-forward,
   .slide-back {
     animation: fade-in 150ms var(--ease) forwards !important;
+  }
+
+  .stagger {
+    animation-delay: 0ms !important;
   }
 }
