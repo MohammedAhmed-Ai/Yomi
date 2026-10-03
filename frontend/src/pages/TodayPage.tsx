@@ -16,6 +16,8 @@ import { useToday } from '../lib/useToday';
 import type { Day, DayScore, Task } from '../lib/types';
 import { ScoreCard } from '../components/ScoreCard';
 import { TaskItem } from '../components/TaskItem';
+import { NudgeToast } from '../components/NudgeToast';
+import type { NudgeMessage } from '../components/NudgeToast';
 
 type Direction = 'forward' | 'back' | 'none';
 
@@ -32,6 +34,54 @@ interface FailedDay {
 }
 
 const DEFAULT_POINTS = 10;
+const MOTIVATIONAL_LINES = [
+  "One task at a time. You've got this.",
+  'Small steps still count.',
+  'You are closer than you think.',
+  'A little progress goes a long way.',
+  'Keep going at your own pace.',
+  'Every finished task is a win.',
+];
+
+function chooseMotivation(previousIndex: number): { index: number; line: string } {
+  const availableCount = MOTIVATIONAL_LINES.length - 1;
+  const randomIndex = Math.floor(Math.random() * availableCount);
+  const index = randomIndex >= previousIndex ? randomIndex + 1 : randomIndex;
+  return { index, line: MOTIVATIONAL_LINES[index] };
+}
+
+function makeNudgeMessage(
+  date: string,
+  today: string,
+  wasComplete: boolean,
+  score: DayScore,
+  motivation: string,
+): NudgeMessage {
+  const tasksLeft = score.tasks_total - score.tasks_done;
+  const taskLabel = tasksLeft === 1 ? 'task' : 'tasks';
+  const stats = `${tasksLeft} ${taskLabel} left · ${score.total_points} pts waiting`;
+  let detail: string;
+
+  if (date > today) {
+    const [year, month, day] = date.split('-').map(Number);
+    const weekday = new Date(year, month - 1, day).toLocaleDateString('en-GB', {
+      weekday: 'long',
+    });
+    const totalTaskLabel = score.tasks_total === 1 ? 'task' : 'tasks';
+    detail = `Planned for ${weekday}. Complete all ${score.tasks_total} ${totalTaskLabel} that day to earn ${score.total_points} pts.`;
+  } else if (wasComplete) {
+    detail = 'A new task joined your day. Finish it to bring the full score back.';
+  } else {
+    detail = `Finish all your tasks to earn the full ${score.total_points} pts for today.`;
+  }
+
+  return {
+    title: 'Every task counts',
+    stats,
+    detail,
+    motivation,
+  };
+}
 
 /** "Saturday, 3 October" — the long-form header, without the year. */
 function formatHeading(iso: string): string {
@@ -121,6 +171,9 @@ export function TodayPage(): ReactElement {
   const [points, setPoints] = useState(DEFAULT_POINTS);
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState('');
+  const [nudge, setNudge] = useState<NudgeMessage | null>(null);
+  const lastMotivationIndexRef = useRef(-1);
+  const dismissNudge = useCallback(() => setNudge(null), []);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [actionError, setActionError] = useState('');
   const [justAdded, setJustAdded] = useState<number | null>(null);
@@ -217,6 +270,7 @@ export function TodayPage(): ReactElement {
     event.preventDefault();
     const trimmed = title.trim();
     if (!trimmed || adding) return;
+    const scoreBeforeAdd = loaded?.date === date ? loaded.score : null;
 
     setAdding(true);
     setAddError('');
@@ -229,6 +283,19 @@ export function TodayPage(): ReactElement {
         current ? { ...current, date, day: freshDay, score: freshScore } : current,
       );
       setJustAdded(created.id);
+      if (date >= today) {
+        const { index, line } = chooseMotivation(lastMotivationIndexRef.current);
+        lastMotivationIndexRef.current = index;
+        setNudge(
+          makeNudgeMessage(
+            date,
+            today,
+            date === today && (scoreBeforeAdd?.is_complete ?? false),
+            freshScore,
+            line,
+          ),
+        );
+      }
     } catch (error: unknown) {
       setAddError(errorMessage(error, 'Could not add that task.'));
     } finally {
@@ -562,6 +629,7 @@ export function TodayPage(): ReactElement {
           </div>
         </div>
       )}
+      <NudgeToast message={nudge} onDismiss={dismissNudge} />
     </div>
   );
 }
