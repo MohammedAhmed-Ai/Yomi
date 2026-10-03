@@ -123,7 +123,12 @@ function readHashDate(): string {
  * never rewrite it, and a future day has nothing to carry. `today` is passed in
  * rather than read from the clock so a rollover reload carries into the new day.
  */
-async function fetchDay(date: string, today: string): Promise<LoadedDay> {
+async function fetchDay(
+  date: string,
+  today: string,
+  readDay: (target: string) => Promise<Day | null>,
+  readScore: (target: string) => Promise<DayScore | null>,
+): Promise<LoadedDay | null> {
   let warning = '';
 
   if (date === today) {
@@ -137,7 +142,8 @@ async function fetchDay(date: string, today: string): Promise<LoadedDay> {
     }
   }
 
-  const [day, score] = await Promise.all([getDay(date), getScore(date)]);
+  const [day, score] = await Promise.all([readDay(date), readScore(date)]);
+  if (!day || !score) return null;
   return { date, day, score, warning };
 }
 
@@ -216,6 +222,8 @@ export function TodayPage(): ReactElement {
   const [justAdded, setJustAdded] = useState<number | null>(null);
   const [removing, setRemoving] = useState<Record<number, DeletePhase>>({});
   const deleteOperations = useRef(new Map<number, DeleteOperation>());
+  const dayRequestId = useRef(0);
+  const scoreRequestId = useRef(0);
   const taskListRef = useRef<HTMLUListElement | null>(null);
   const highlightFrame = useRef<number | undefined>(undefined);
   const [highlightedTaskId, setHighlightedTaskId] = useState<number | null>(null);
@@ -239,6 +247,18 @@ export function TodayPage(): ReactElement {
   const [enterDirection, setEnterDirection] = useState<Direction>('none');
   // The previous "today", so a rollover can tell which day was on screen.
   const previousTodayRef = useRef(today);
+
+  const readDay = useCallback(async (target: string): Promise<Day | null> => {
+    const requestId = ++dayRequestId.current;
+    const result = await getDay(target);
+    return requestId === dayRequestId.current ? result : null;
+  }, []);
+
+  const readScore = useCallback(async (target: string): Promise<DayScore | null> => {
+    const requestId = ++scoreRequestId.current;
+    const result = await getScore(target);
+    return requestId === scoreRequestId.current ? result : null;
+  }, []);
 
   useLayoutEffect(() => {
     const rows = Array.from(
@@ -299,8 +319,8 @@ export function TodayPage(): ReactElement {
 
     const run = async (): Promise<void> => {
       try {
-        const result = await fetchDay(date, today);
-        if (cancelled) return;
+        const result = await fetchDay(date, today, readDay, readScore);
+        if (cancelled || !result) return;
         const previousDate = loadedDateRef.current;
         loadedDateRef.current = result.date;
         // The slide belongs to the day change itself: a first load or a reload of
@@ -326,7 +346,7 @@ export function TodayPage(): ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [date, today, attempt]);
+  }, [date, today, attempt, readDay, readScore]);
 
   const goTo = useCallback((next: string) => {
     const hash = `#/${next}`;
@@ -369,9 +389,10 @@ export function TodayPage(): ReactElement {
     try {
       const created = await createTask({ title: trimmed, points, planned_date: date });
       setTitle('');
-      const [freshDay, freshScore] = await Promise.all([getDay(date), getScore(date)]);
+      const [freshDay, freshScore] = await Promise.all([readDay(date), readScore(date)]);
+      if (!freshDay || !freshScore || dateRef.current !== date) return;
       setLoaded((current) =>
-        current ? { ...current, date, day: freshDay, score: freshScore } : current,
+        current?.date === date ? { ...current, day: freshDay, score: freshScore } : current,
       );
       setJustAdded(created.id);
       const isReopen =
@@ -430,7 +451,8 @@ export function TodayPage(): ReactElement {
 
     try {
       const updated = wasDone ? await uncompleteTask(task.id) : await completeTask(task.id);
-      const freshScore = await getScore(date);
+      dayRequestId.current += 1;
+      const freshScore = await readScore(date);
       setLoaded((current) =>
         current
           ? {
@@ -439,7 +461,7 @@ export function TodayPage(): ReactElement {
                 ...current.day,
                 tasks: patchTask(current.day.tasks, task.id, () => updated),
               },
-              score: freshScore,
+              score: freshScore ?? current.score,
             }
           : current,
       );
@@ -465,7 +487,8 @@ export function TodayPage(): ReactElement {
     setActionError('');
     try {
       const updated = await updateTask(task.id, { title: edit.title, points: edit.points });
-      const freshScore = await getScore(date);
+      dayRequestId.current += 1;
+      const freshScore = await readScore(date);
       setLoaded((current) =>
         current
           ? {
@@ -474,7 +497,7 @@ export function TodayPage(): ReactElement {
                 ...current.day,
                 tasks: patchTask(current.day.tasks, task.id, () => updated),
               },
-              score: freshScore,
+              score: freshScore ?? current.score,
             }
           : current,
       );
@@ -495,12 +518,24 @@ export function TodayPage(): ReactElement {
       try {
         await deleteTask(task.id);
         operation.succeeded = true;
-        if (operation.exited) deleteOperations.current.delete(task.id);
-        try {
-          const freshScore = await getScore(operation.date);
+        // Invalidate reads that started before the server accepted the delete.
+        dayRequestId.current += 1;
+        scoreRequestId.current += 1;
+        if (operation.exited) {
+          deleteOperations.current.delete(task.id);
           setLoaded((current) =>
-            current?.date === operation.date ? { ...current, score: freshScore } : current,
+            current?.date === operation.date
+              ? { ...current, day: { ...current.day, tasks: removeTask(current.day.tasks, task.id) } }
+              : current,
           );
+        }
+        try {
+          const freshScore = await readScore(operation.date);
+          if (freshScore) {
+            setLoaded((current) =>
+              current?.date === operation.date ? { ...current, score: freshScore } : current,
+            );
+          }
         } catch (error: unknown) {
           if (dateRef.current === operation.date) {
             setActionError(errorMessage(error, 'Could not refresh the score.'));
