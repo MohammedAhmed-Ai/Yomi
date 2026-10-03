@@ -12,6 +12,7 @@ import {
   ApiError,
 } from '../lib/api';
 import { addDays, todayISO } from '../lib/dates';
+import { useToday } from '../lib/useToday';
 import type { Day, DayScore, Task } from '../lib/types';
 import { ScoreCard } from '../components/ScoreCard';
 import { TaskItem } from '../components/TaskItem';
@@ -60,13 +61,14 @@ function readHashDate(): string {
 }
 
 /**
- * Loads one day. Carry-over is a today-only, once-per-visit action: opening a
- * past day must never rewrite it, and a future day has nothing to carry.
+ * Loads one day. Carry-over is a today-only action: opening a past day must
+ * never rewrite it, and a future day has nothing to carry. `today` is passed in
+ * rather than read from the clock so a rollover reload carries into the new day.
  */
-async function fetchDay(date: string): Promise<LoadedDay> {
+async function fetchDay(date: string, today: string): Promise<LoadedDay> {
   let warning = '';
 
-  if (date === todayISO()) {
+  if (date === today) {
     try {
       await carryOver();
     } catch (error: unknown) {
@@ -109,6 +111,8 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 export function TodayPage(): ReactElement {
+  // Live local date: it rolls over at midnight even if the tab stays open.
+  const today = useToday();
   const [date, setDate] = useState<string>(readHashDate);
   const [direction, setDirection] = useState<Direction>('none');
   const [loaded, setLoaded] = useState<LoadedDay | null>(null);
@@ -126,6 +130,8 @@ export function TodayPage(): ReactElement {
 
   // Compared against the hash so browser back/forward slides the right way too.
   const dateRef = useRef(date);
+  // The previous "today", so a rollover can tell which day was on screen.
+  const previousTodayRef = useRef(today);
 
   useEffect(() => {
     const onHashChange = (): void => {
@@ -145,7 +151,7 @@ export function TodayPage(): ReactElement {
 
     const run = async (): Promise<void> => {
       try {
-        const result = await fetchDay(date);
+        const result = await fetchDay(date, today);
         if (cancelled) return;
         setLoaded(result);
         setFailed(null);
@@ -165,7 +171,7 @@ export function TodayPage(): ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [date, attempt]);
+  }, [date, today, attempt]);
 
   const goTo = useCallback((next: string) => {
     const hash = `#/${next}`;
@@ -174,6 +180,27 @@ export function TodayPage(): ReactElement {
   }, []);
 
   const retry = (): void => setAttempt((value) => value + 1);
+
+  // Midnight rollover: yesterday's unfinished work carries into the new day, and
+  // whichever day is on screen must re-evaluate its past/future rules.
+  useEffect(() => {
+    const previous = previousTodayRef.current;
+    if (previous === today) return;
+    previousTodayRef.current = today;
+
+    if (dateRef.current === previous) {
+      // Was looking at the old today: follow it across the boundary.
+      goTo(today);
+      return;
+    }
+
+    if (dateRef.current !== today) {
+      // New today is not on screen, but its carry-over still needs to happen.
+      void carryOver().catch(() => undefined);
+    }
+
+    setAttempt((value) => value + 1);
+  }, [today, goTo]);
 
   const handleAdd = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
@@ -317,7 +344,6 @@ export function TodayPage(): ReactElement {
     }
   };
 
-  const today = todayISO();
   const isToday = date === today;
   const isPast = date < today;
   const isFuture = date > today;
