@@ -32,7 +32,12 @@ body {
 }
 
 .press {
-  transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+  transition:
+    transform var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
 }
 
 .press:hover {
@@ -45,7 +50,7 @@ body {
 
 /* Calm entrance delay for lists. Animation-delay is the only stagger channel. */
 .stagger {
-  animation-delay: calc(var(--stagger-index, 0) * 40ms);
+  animation-delay: calc(var(--stagger-index, 0) * 30ms);
 }
 
 /* One soft breath when the day is complete. Opacity only. */
@@ -115,17 +120,19 @@ body {
 
 /* Day-to-day navigation: a short horizontal drift in the direction of travel. */
 .slide-forward {
-  animation: slide-in-forward var(--dur) var(--ease) both;
+  opacity: 0;
+  animation: slide-in-forward var(--dur) var(--ease) forwards;
 }
 
 .slide-back {
-  animation: slide-in-back var(--dur) var(--ease) both;
+  opacity: 0;
+  animation: slide-in-back var(--dur) var(--ease) forwards;
 }
 
 @keyframes slide-in-forward {
   from {
     opacity: 0;
-    transform: translateX(8px);
+    transform: translateX(24px);
   }
   to {
     opacity: 1;
@@ -136,7 +143,7 @@ body {
 @keyframes slide-in-back {
   from {
     opacity: 0;
-    transform: translateX(-8px);
+    transform: translateX(-24px);
   }
   to {
     opacity: 1;
@@ -172,5 +179,11 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  /* Day transitions keep a brief fade, but lose the horizontal slide. */
+  .slide-forward,
+  .slide-back {
+    animation: fade-in 150ms var(--ease) forwards !important;
   }
 }

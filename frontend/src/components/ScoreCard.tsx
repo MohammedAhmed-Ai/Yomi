@@ -15,24 +15,35 @@ function prefersReducedMotion(): boolean {
 }
 
 /**
- * Counts the score up to its final value on mount, so the day "arrives" rather
- * than snapping into place. Respects prefers-reduced-motion by showing the
- * final number immediately.
+ * Counts toward `target`, starting from whatever was last shown. On first paint
+ * that means counting up from zero, and on a day change it flows from the old
+ * day's score to the new one instead of restarting. Respects
+ * prefers-reduced-motion by showing the final number immediately.
  */
 function useCountUp(target: number): number {
   const [value, setValue] = useState(0);
+  // The value currently on screen, so an interrupted run resumes from there.
+  const shown = useRef(0);
   const frame = useRef<number | undefined>(undefined);
 
   useEffect(() => {
-    // Reduced motion renders the final value directly, so nothing to animate.
-    if (prefersReducedMotion()) return;
+    if (prefersReducedMotion()) {
+      shown.current = target;
+      return;
+    }
+
+    const from = shown.current;
+    const delta = target - from;
+    if (delta === 0) return;
 
     const duration = 600;
     const started = performance.now();
 
     const tick = (now: number): void => {
       const progress = Math.min((now - started) / duration, 1);
-      setValue(Math.round(target * easeOutCubic(progress)));
+      const next = Math.round(from + delta * easeOutCubic(progress));
+      shown.current = next;
+      setValue(next);
       if (progress < 1) {
         frame.current = requestAnimationFrame(tick);
       }

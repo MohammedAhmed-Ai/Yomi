@@ -17,7 +17,6 @@ import type { Day, DayScore, Task } from '../lib/types';
 import { ScoreCard } from '../components/ScoreCard';
 import { TaskItem } from '../components/TaskItem';
 
-type LoadState = 'loading' | 'ready' | 'error';
 type Direction = 'forward' | 'back' | 'none';
 
 interface LoadedDay {
@@ -114,7 +113,6 @@ export function TodayPage(): ReactElement {
   // Live local date: it rolls over at midnight even if the tab stays open.
   const today = useToday();
   const [date, setDate] = useState<string>(readHashDate);
-  const [direction, setDirection] = useState<Direction>('none');
   const [loaded, setLoaded] = useState<LoadedDay | null>(null);
   const [failed, setFailed] = useState<FailedDay | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -130,6 +128,12 @@ export function TodayPage(): ReactElement {
 
   // Compared against the hash so browser back/forward slides the right way too.
   const dateRef = useRef(date);
+  // Direction of the most recent navigation. Held in a ref so it is only applied
+  // once the matching data actually arrives, never on a reload of the same day.
+  const directionRef = useRef<Direction>('none');
+  // The date currently on screen, so a reload is told apart from a day change.
+  const loadedDateRef = useRef<string | null>(null);
+  const [enterDirection, setEnterDirection] = useState<Direction>('none');
   // The previous "today", so a rollover can tell which day was on screen.
   const previousTodayRef = useRef(today);
 
@@ -137,7 +141,7 @@ export function TodayPage(): ReactElement {
     const onHashChange = (): void => {
       const next = readHashDate();
       const previous = dateRef.current;
-      setDirection(next > previous ? 'forward' : next < previous ? 'back' : 'none');
+      directionRef.current = next > previous ? 'forward' : next < previous ? 'back' : 'none';
       dateRef.current = next;
       setDate(next);
     };
@@ -153,6 +157,13 @@ export function TodayPage(): ReactElement {
       try {
         const result = await fetchDay(date, today);
         if (cancelled) return;
+        const previousDate = loadedDateRef.current;
+        loadedDateRef.current = result.date;
+        // The slide belongs to the day change itself: a first load or a reload of
+        // the day already on screen just fades in.
+        setEnterDirection(
+          previousDate === null || previousDate === result.date ? 'none' : directionRef.current,
+        );
         setLoaded(result);
         setFailed(null);
         // A day change starts from a clean slate.
@@ -356,21 +367,27 @@ export function TodayPage(): ReactElement {
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background';
 
   const navButton =
-    'press flex h-8 w-8 items-center justify-center rounded-[12px] border border-border bg-surface text-text ' +
+    'press flex h-8 w-8 items-center justify-center rounded-[12px] border border-border bg-surface text-text transition-colors hover:border-primary hover:text-primary ' +
     focusRing;
 
-  // Derived from the loaded date, so switching days shows the skeleton without
-  // needing a synchronous setState inside the effect.
-  const fresh = loaded !== null && loaded.date === date;
-  const state: LoadState = fresh ? 'ready' : failed !== null && failed.date === date ? 'error' : 'loading';
+  // The latest day we loaded may belong to a different date. Keep showing it,
+  // dimmed, while the requested day is on its way, so nothing flashes to a
+  // skeleton. Only the very first load has no content to fall back on.
+  const hasContent = loaded !== null;
+  const isStale = loaded !== null && loaded.date !== date;
+  const showError = failed !== null && failed.date === date;
 
-  const day = fresh ? loaded.day : null;
-  const score = fresh ? loaded.score : null;
+  const day = loaded?.day ?? null;
+  const score = loaded?.score ?? null;
   const tasks = day ? rootTasks(day) : [];
   const canAdd = title.trim().length > 0 && !adding;
 
   const slideClass =
-    direction === 'forward' ? 'slide-forward' : direction === 'back' ? 'slide-back' : 'fade-in';
+    enterDirection === 'forward'
+      ? 'slide-forward'
+      : enterDirection === 'back'
+        ? 'slide-back'
+        : 'fade-in';
 
   return (
     <div className="mx-auto w-full max-w-[640px] px-4 py-6">
@@ -410,14 +427,14 @@ export function TodayPage(): ReactElement {
           <button
             type="button"
             onClick={() => goTo(today)}
-            className={`press rounded-[12px] border border-border bg-surface px-2 py-0.5 text-xs text-text ${focusRing}`}
+            className={`press rounded-[12px] border border-border bg-surface px-2 py-0.5 text-xs text-text transition-colors hover:border-primary hover:text-primary ${focusRing}`}
           >
             Today
           </button>
         )}
       </div>
 
-      {state === 'loading' && (
+      {!hasContent && !showError && (
         <div>
           <div className="surface mt-3 h-24 animate-pulse" />
           <div className="surface mt-3 h-40 animate-pulse" />
@@ -425,7 +442,7 @@ export function TodayPage(): ReactElement {
         </div>
       )}
 
-      {state === 'error' && (
+      {showError && (
         <div className="py-10 text-center">
           <h3 className="m-0 text-lg font-semibold">Could not load this day</h3>
           <p className="mt-1 text-sm text-muted">{failed?.message}</p>
@@ -439,8 +456,12 @@ export function TodayPage(): ReactElement {
         </div>
       )}
 
-      {state === 'ready' && day !== null && score !== null && (
-        <div key={date} className={slideClass}>
+      {hasContent && !showError && day !== null && score !== null && (
+        <div
+          className={`transition-opacity duration-200 ${
+            isStale ? 'pointer-events-none opacity-60' : 'opacity-100'
+          }`}
+        >
           <div className="mt-3">
             <ScoreCard score={score} />
           </div>
@@ -510,30 +531,32 @@ export function TodayPage(): ReactElement {
             </p>
           )}
 
-          {tasks.length > 0 && (
-            <div className="surface mt-3 px-4 py-1">
-              <ul className="m-0 list-none p-0">
-                {tasks.map((task, index) => (
-                  <li
-                    key={task.id}
-                    className={removing[task.id] ? '' : 'border-b border-border last:border-b-0'}
-                  >
-                    <TaskItem
-                      task={task}
-                      index={index}
-                      entering={task.id === justAdded}
-                      exiting={removing[task.id] ?? false}
-                      onToggle={canComplete ? (target) => void handleToggle(target) : undefined}
-                      onSave={readOnly ? undefined : handleSave}
-                      onDeleteRequest={readOnly ? undefined : handleDeleteRequest}
-                      onDelete={readOnly ? undefined : (target) => void handleDelete(target)}
-                      busy={busyId === task.id}
-                    />
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <div className="mt-3 min-h-[140px]">
+            {tasks.length > 0 && (
+              <div key={loaded.date} className={`surface px-4 py-1 ${isStale ? '' : slideClass}`}>
+                <ul className="m-0 list-none p-0">
+                  {tasks.map((task, index) => (
+                    <li
+                      key={task.id}
+                      className={removing[task.id] ? '' : 'border-b border-border last:border-b-0'}
+                    >
+                      <TaskItem
+                        task={task}
+                        index={index}
+                        entering={task.id === justAdded}
+                        exiting={removing[task.id] ?? false}
+                        onToggle={canComplete ? (target) => void handleToggle(target) : undefined}
+                        onSave={readOnly ? undefined : handleSave}
+                        onDeleteRequest={readOnly ? undefined : handleDeleteRequest}
+                        onDelete={readOnly ? undefined : (target) => void handleDelete(target)}
+                        busy={busyId === task.id}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -31,6 +31,9 @@ interface TaskItemProps {
 
 const EXIT_MS = 240;
 
+/** Only the first eight rows are offset; the rest arrive together. */
+const STAGGER_CAP = 7;
+
 export function TaskItem({
   task,
   index,
@@ -213,7 +216,7 @@ export function TaskItem({
       className={`group flex items-start gap-3 py-2 ${missed ? 'opacity-45' : ''} ${entrance} ${
         exiting ? 'task-exit' : ''
       }`}
-      style={{ '--stagger-index': index } as React.CSSProperties}
+      style={{ '--stagger-index': Math.min(index, STAGGER_CAP) } as React.CSSProperties}
     >
       {onToggle && !missed ? (
         <button
