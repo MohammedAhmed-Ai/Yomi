@@ -71,6 +71,30 @@ export interface DayScore {
   score: number;
 }
 
+export interface StatsRangeDay {
+  date: string;
+  tasks_total: number;
+  tasks_done: number;
+  total_points: number;
+  earned_points: number;
+  completion_pct: number;
+  score: number;
+  is_complete: boolean;
+  is_empty: boolean;
+}
+
+export interface StatsRangeSummary {
+  days_complete: number;
+  days_with_tasks: number;
+  total_score: number;
+  avg_completion_pct: number;
+}
+
+export interface StatsRange {
+  days: StatsRangeDay[];
+  summary: StatsRangeSummary;
+}
+
 export interface CarryOverResult {
   date: string;
   tasks_carried: number;
