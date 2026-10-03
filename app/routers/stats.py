@@ -2,13 +2,13 @@ import re
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
 from sqlalchemy.orm import Session, lazyload
 
 from app.db import get_db
 from app.models import Task
 from app.schemas import StatsRangeDay, StatsRangeOut, StatsRangeSummary
 from app.scoring import score_day_tasks
+from app.task_queries import active_tasks
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
@@ -52,14 +52,12 @@ def get_stats_range(
 
     tasks_by_date: dict[date, list[Task]] = {}
     tasks = db.execute(
-        select(Task)
-        .options(lazyload(Task.subtasks), lazyload(Task.tags))
-        .where(
+        active_tasks(
             Task.planned_date >= start_date,
             Task.planned_date <= end_date,
-            Task.status != "deleted",
             Task.parent_task_id.is_(None),
         )
+        .options(lazyload(Task.subtasks), lazyload(Task.tags))
     ).scalars().all()
     for task in tasks:
         tasks_by_date.setdefault(task.planned_date, []).append(task)

@@ -1,8 +1,20 @@
-from sqlalchemy import Column, Integer, String, Date, DateTime, Boolean, ForeignKey, Text
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
+from sqlalchemy.orm import DeclarativeBase, relationship
 from datetime import datetime, timezone
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    pass
 
 
 def utcnow() -> datetime:
@@ -24,13 +36,25 @@ class Task(Base):
     completed_at = Column(DateTime, nullable=True)
     completed_date = Column(Date, nullable=True)
     carry_count = Column(Integer, default=0)
-    carried_from_id = Column(Integer, ForeignKey("tasks.id"), nullable=True, index=True)
+    carried_from_id = Column(Integer, ForeignKey("tasks.id"), nullable=True)
     miss_reason = Column(String, nullable=True)
     parent_task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True, index=True)
     recurrence_rule = Column(String, nullable=True)
     sort_order = Column(Integer, default=0)
     created_at = Column(DateTime, default=utcnow)
     deleted_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_tasks_planned_date_status", "planned_date", "status"),
+        Index("ix_tasks_completed_date", "completed_date"),
+        Index("ix_tasks_carried_from_id", "carried_from_id"),
+        Index(
+            "uq_tasks_carried_from_id_not_null",
+            "carried_from_id",
+            unique=True,
+            sqlite_where=carried_from_id.is_not(None),
+        ),
+    )
 
     parent = relationship(
         "Task",

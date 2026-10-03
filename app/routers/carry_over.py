@@ -1,10 +1,14 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session, selectinload
+import sqlite3
+
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.models import Task
 from app.schemas import CarryOverResult
+from app.task_queries import active_tasks
 from app.time_utils import local_date
 
 router = APIRouter(prefix="/carry-over", tags=["carry-over"])
@@ -50,42 +54,73 @@ def carry_over(db: Session = Depends(get_db)):
     """
     today = local_date()
 
-    overdue = db.execute(
-        select(Task)
-        .options(selectinload(Task.subtasks))
-        .where(
-            Task.status == "pending",
-            Task.planned_date < today,
-            Task.parent_task_id.is_(None),
-        )
-        .order_by(Task.planned_date, Task.id)
-    ).scalars().unique().all()
+    for attempt in range(2):
+        try:
+            overdue = db.execute(
+                active_tasks(
+                    Task.status == "pending",
+                    Task.planned_date < today,
+                    Task.parent_task_id.is_(None),
+                )
+                .options(selectinload(Task.subtasks))
+                .order_by(Task.planned_date, Task.id)
+            ).scalars().unique().all()
 
-    tasks_carried = 0
-    subtasks_carried = 0
+            tasks_carried = 0
+            subtasks_carried = 0
 
-    for original in overdue:
-        # Only pending children travel; missed or deleted ones stay as they are.
-        pending_subtasks = [s for s in original.subtasks if s.status == "pending"]
+            for original in overdue:
+                pending_subtasks = [
+                    subtask
+                    for subtask in original.subtasks
+                    if subtask.status == "pending"
+                ]
+                if _has_copy(db, original.id):
+                    original.status = "missed"
+                    continue
 
-        carried_parent = clone_for(original, today)
-        db.add(carried_parent)
-        db.flush()  # assign the new parent's id to its subtask copies
-        tasks_carried += 1
+                carried_parent = clone_for(original, today)
+                db.add(carried_parent)
+                db.flush()
+                tasks_carried += 1
 
-        for subtask in pending_subtasks:
-            db.add(clone_for(subtask, today, parent_task_id=carried_parent.id))
-            subtasks_carried += 1
+                for subtask in pending_subtasks:
+                    if _has_copy(db, subtask.id):
+                        continue
+                    db.add(clone_for(subtask, today, parent_task_id=carried_parent.id))
+                    subtasks_carried += 1
 
-        original.status = "missed"
-        for subtask in pending_subtasks:
-            subtask.status = "missed"
+                original.status = "missed"
+                for subtask in pending_subtasks:
+                    subtask.status = "missed"
 
-    db.commit()
+            db.commit()
+            return CarryOverResult(
+                date=today,
+                tasks_carried=tasks_carried,
+                subtasks_carried=subtasks_carried,
+                total_carried=tasks_carried + subtasks_carried,
+            )
+        except IntegrityError as exc:
+            db.rollback()
+            if attempt == 0 and _is_carried_from_conflict(db, exc):
+                continue
+            raise
 
-    return CarryOverResult(
-        date=today,
-        tasks_carried=tasks_carried,
-        subtasks_carried=subtasks_carried,
-        total_carried=tasks_carried + subtasks_carried,
+    raise RuntimeError("Carry-over retry exhausted unexpectedly")
+
+
+def _has_copy(db: Session, source_id: int) -> bool:
+    return db.execute(
+        select(Task.id).where(Task.carried_from_id == source_id)
+    ).scalar_one_or_none() is not None
+
+
+def _is_carried_from_conflict(db: Session, error: IntegrityError) -> bool:
+    original = error.orig
+    return (
+        db.get_bind().dialect.name == "sqlite"
+        and isinstance(original, sqlite3.IntegrityError)
+        and getattr(original, "sqlite_errorname", None) == "SQLITE_CONSTRAINT_UNIQUE"
+        and "tasks.carried_from_id" in str(original)
     )

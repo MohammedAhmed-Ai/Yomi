@@ -118,23 +118,34 @@ def test_start_day_invalid_date(client):
 
 
 def test_patch_day_saves_reflection_and_mood(client):
-    res = client.patch(f"/api/days/{iso()}", json={"reflection": "Focused day", "mood": 8})
+    res = client.patch(f"/api/days/{iso()}", json={"reflection": "Focused day", "mood": 5})
     assert res.status_code == status.HTTP_200_OK
     assert res.json()["reflection"] == "Focused day"
-    assert res.json()["mood"] == 8
+    assert res.json()["mood"] == 5
 
 
 def test_patch_day_partial_update_keeps_other_fields(client):
     client.patch(f"/api/days/{iso()}", json={"reflection": "Kept", "mood": 5})
-    res = client.patch(f"/api/days/{iso()}", json={"mood": 9}).json()
+    res = client.patch(f"/api/days/{iso()}", json={"mood": 5}).json()
     assert res["reflection"] == "Kept"
-    assert res["mood"] == 9
+    assert res["mood"] == 5
 
 
 def test_patch_day_mood_validation(client):
     assert client.patch(f"/api/days/{iso()}", json={"mood": 0}).status_code == 422
-    assert client.patch(f"/api/days/{iso()}", json={"mood": 11}).status_code == 422
+    assert client.patch(f"/api/days/{iso()}", json={"mood": 6}).status_code == 422
     assert client.patch(f"/api/days/{iso()}", json={"locked": "maybe"}).status_code == 422
+
+
+def test_mood_five_is_accepted_and_six_is_rejected(client):
+    assert client.patch(f"/api/days/{iso()}", json={"mood": 5}).status_code == 200
+    assert client.patch(f"/api/days/{iso()}", json={"mood": 6}).status_code == 422
+
+
+def test_mood_can_be_cleared(client):
+    response = client.patch(f"/api/days/{iso()}", json={"mood": None})
+    assert response.status_code == 200
+    assert response.json()["mood"] is None
 
 
 def test_patch_day_rejects_unknown_fields(client):
@@ -180,7 +191,7 @@ def test_lock_allows_reflection_edits(client):
     """A locked day freezes its tasks, not the user's own notes."""
     test_date = iso(8)
     client.patch(f"/api/days/{test_date}", json={"locked": True})
-    res = client.patch(f"/api/days/{test_date}", json={"reflection": "Post-mortem", "mood": 6})
+    res = client.patch(f"/api/days/{test_date}", json={"reflection": "Post-mortem", "mood": 5})
     assert res.status_code == 200
     assert res.json()["reflection"] == "Post-mortem"
 

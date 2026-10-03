@@ -1,6 +1,8 @@
 from fastapi import status
 from datetime import date, timedelta
 from freezegun import freeze_time
+import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.models import Tag, Task
 
@@ -66,6 +68,24 @@ def test_running_twice_creates_no_duplicates(client):
 
     today_tasks = client.get(f"/api/tasks/?planned_date={iso()}").json()
     assert sorted(t["title"] for t in today_tasks) == ["Also overdue", "Overdue"]
+
+
+def test_carried_task_response_includes_source_id(client):
+    original = make(client, "With source", -1)
+    assert run(client).status_code == status.HTTP_200_OK
+    carried = client.get(f"/api/tasks/?planned_date={iso()}").json()[0]
+    assert carried["carried_from_id"] == original["id"]
+
+
+def test_unique_carried_from_index_rejects_duplicate_copy(client, db_session):
+    original = make(client, "Unique source", -1)
+    db_session.add(Task(title="First copy", carried_from_id=original["id"]))
+    db_session.flush()
+
+    with pytest.raises(IntegrityError):
+        with db_session.begin_nested():
+            db_session.add(Task(title="Duplicate copy", carried_from_id=original["id"]))
+            db_session.flush()
 
 
 def test_carry_count_increases_when_carried_twice(client):
