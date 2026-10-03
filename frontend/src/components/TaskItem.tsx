@@ -103,6 +103,15 @@ export function TaskItem({
   const [editError, setEditError] = useState('');
   // Escape removes the inputs, which can fire blur; this keeps that from saving.
   const cancelled = useRef(false);
+  const deleteAnimationHandlers = useRef({
+    task,
+    onDeleteCollapse,
+    onDeleteAnimationEnd,
+  });
+
+  useEffect(() => {
+    deleteAnimationHandlers.current = { task, onDeleteCollapse, onDeleteAnimationEnd };
+  }, [task, onDeleteCollapse, onDeleteAnimationEnd]);
 
   useEffect(() => {
     if (!editing) return;
@@ -127,6 +136,37 @@ export function TaskItem({
       onDeleteAnimationEnd?.(task, 'exiting');
     }
   };
+
+  useEffect(() => {
+    if (!currentExitPhase) return;
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const duration =
+      currentExitPhase === 'exiting'
+        ? reducedMotion
+          ? 150
+          : 300
+        : currentExitPhase === 'collapsing'
+          ? reducedMotion
+            ? 0
+            : 250
+          : reducedMotion
+            ? 150
+            : 250;
+    const timer = window.setTimeout(() => {
+      const handlers = deleteAnimationHandlers.current;
+      if (currentExitPhase === 'exiting' && !reducedMotion) {
+        handlers.onDeleteCollapse?.(handlers.task);
+      } else {
+        handlers.onDeleteAnimationEnd?.(
+          handlers.task,
+          currentExitPhase === 'restoring' ? 'restoring' : 'exiting',
+        );
+      }
+    }, duration + 100);
+
+    return () => window.clearTimeout(timer);
+  }, [currentExitPhase, task.id]);
 
   const startEditing = (): void => {
     cancelled.current = false;
