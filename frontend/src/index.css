@@ -20,6 +20,11 @@ body {
   border-radius: 12px;
 }
 
+.dark .add-task-button {
+  background-color: #6f60e8;
+  border-color: #6f60e8;
+}
+
 .fade-in {
   opacity: 0;
   animation: fade-in var(--dur) var(--ease) forwards;
@@ -116,6 +121,15 @@ body {
   color: var(--color-muted);
   text-decoration-line: line-through;
   text-decoration-color: var(--color-muted);
+}
+
+.dark .task-title[data-done='true'],
+.dark .task-points[data-done='true'] {
+  color: #c4c0bc;
+}
+
+.dark .task-title[data-done='true'] {
+  text-decoration-color: #c4c0bc;
 }
 
 /* Day-to-day navigation: a short horizontal drift in the direction of travel. */
