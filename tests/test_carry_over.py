@@ -1,10 +1,17 @@
 from fastapi import status
+from contextlib import contextmanager
 from datetime import date, timedelta
 from freezegun import freeze_time
 import pytest
+from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
 from app.models import Tag, Task
+
+
+# A carry-over must touch the whole backlog in a fixed number of statements, so
+# this is the ceiling the N+1 regression test below enforces.
+MAX_CARRY_OVER_STATEMENTS = 12
 
 
 def iso(offset_days: int = 0) -> str:
@@ -18,6 +25,21 @@ def make(client, title, planned_offset, **extra):
 
 def run(client):
     return client.post("/api/carry-over/")
+
+
+@contextmanager
+def count_statements(engine):
+    """Record every SQL statement the engine emits inside the block."""
+    statements: list[str] = []
+
+    def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", before_cursor_execute)
+    try:
+        yield statements
+    finally:
+        event.remove(engine, "before_cursor_execute", before_cursor_execute)
 
 
 def test_pending_task_is_carried_to_today_and_original_becomes_missed(client):
@@ -213,3 +235,54 @@ def test_carry_over_uses_the_configured_timezone(client, monkeypatch):
     assert utc["date"] == "2026-10-04"
     assert utc["total_carried"] == 0
     assert client.get("/api/tasks/?planned_date=2026-10-04").json()[0]["id"] == task["id"]
+
+
+def test_carry_over_does_not_issue_a_query_per_task(client, db_session):
+    """Carrying a backlog must not cost a query per task (N+1 regression guard).
+
+    Existence of an existing copy used to be checked once per task and once per
+    subtask, so a 200-task backlog cost 200 extra SELECTs. It must stay flat.
+    """
+    roots, subtasks_per_root = 50, 3
+    for i in range(roots):
+        parent = make(client, f"Backlog {i}", -1 - (i % 5))
+        for s in range(subtasks_per_root):
+            client.post(
+                "/api/tasks/",
+                json={
+                    "title": f"Backlog {i} sub {s}",
+                    "parent_task_id": parent["id"],
+                },
+            )
+
+    with count_statements(db_session.get_bind()) as statements:
+        result = run(client)
+
+    assert result.status_code == status.HTTP_200_OK
+    assert result.json()["tasks_carried"] == roots
+    assert result.json()["subtasks_carried"] == roots * subtasks_per_root
+    assert result.json()["total_carried"] == roots * (1 + subtasks_per_root)
+    assert len(statements) <= MAX_CARRY_OVER_STATEMENTS, (
+        f"{len(statements)} statements for {roots} tasks:\n"
+        + "\n".join(f"  {s.splitlines()[0][:90]}" for s in statements)
+    )
+
+
+def test_query_count_does_not_grow_with_backlog_size(client, db_session):
+    """A larger backlog must not add queries, only rows."""
+    def measure(roots: int) -> int:
+        for i in range(roots):
+            parent = make(client, f"Batch {i}", -1 - (i % 5))
+            client.post(
+                "/api/tasks/",
+                json={"title": f"Batch {i} sub", "parent_task_id": parent["id"]},
+            )
+        with count_statements(db_session.get_bind()) as statements:
+            assert run(client).status_code == status.HTTP_200_OK
+        return len(statements)
+
+    small = measure(5)
+    large = measure(45)
+
+    assert large <= MAX_CARRY_OVER_STATEMENTS
+    assert large == small
