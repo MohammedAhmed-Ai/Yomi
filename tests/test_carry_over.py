@@ -1,12 +1,14 @@
 from fastapi import status
 from contextlib import contextmanager
 from datetime import date, timedelta
+from typing import NamedTuple
 from freezegun import freeze_time
 import pytest
-from sqlalchemy import event
+from sqlalchemy import event, func, insert, select
 from sqlalchemy.exc import IntegrityError
 
-from app.models import Tag, Task
+from app.models import Tag, Task, TaskTag, utcnow
+from app.time_utils import local_date
 
 
 # A carry-over must touch the whole backlog in a fixed number of statements, so
@@ -286,3 +288,515 @@ def test_query_count_does_not_grow_with_backlog_size(client, db_session):
 
     assert large <= MAX_CARRY_OVER_STATEMENTS
     assert large == small
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared by the behaviour tests below
+# ---------------------------------------------------------------------------
+
+# The columns that describe the *work* rather than the day it sits on. A carried
+# copy must reproduce these from its source byte for byte.
+COPIED_VERBATIM = ("title", "notes", "points", "priority", "sort_order", "original_date")
+
+# Every column except the one carry-over is allowed to change on a source.
+SOURCE_UNCHANGED = tuple(c.name for c in Task.__table__.c if c.name != "status")
+
+
+def task_rows(db_session) -> dict[int, dict]:
+    """Every task row as a plain dict, keyed by id.
+
+    Read through Core rather than the ORM on purpose: carry-over writes with Core
+    DML, so the session's identity map still holds the pre-carry-over `pending`
+    status of the sources and would hide what the endpoint actually wrote.
+    """
+    return {
+        row.id: dict(row._mapping)
+        for row in db_session.execute(select(Task.__table__)).all()
+    }
+
+
+def tag_ids_by_task(db_session) -> dict[int, list[int]]:
+    """Sorted tag ids per task, read straight from the link table.
+
+    Every task gets an entry, so an untagged task reads as `[]` rather than
+    missing and a tag that was dropped looks like a difference.
+    """
+    links: dict[int, list[int]] = {}
+    for task_id, tag_id in db_session.execute(
+        select(TaskTag.task_id, TaskTag.tag_id).order_by(TaskTag.task_id, TaskTag.tag_id)
+    ).all():
+        links.setdefault(task_id, []).append(tag_id)
+    task_ids = db_session.execute(select(Task.__table__.c.id)).scalars().all()
+    return {task_id: links.get(task_id, []) for task_id in task_ids}
+
+
+def copies_by_source(db_session) -> dict[int, dict]:
+    """source id -> the single row carried from it.
+
+    Fails the test outright if a source ever has two copies, which is the
+    duplication that the unique index and the retry below exist to prevent.
+    """
+    by_source: dict[int, dict] = {}
+    for row in task_rows(db_session).values():
+        source_id = row["carried_from_id"]
+        if source_id is None:
+            continue
+        assert source_id not in by_source, f"two copies of task {source_id}"
+        by_source[source_id] = row
+    return by_source
+
+
+def assert_fields_equal(copy: dict, source: dict, fields, label: str) -> None:
+    """Compare field by field, so a failure names the field that drifted."""
+    drift = {f: {"copy": copy[f], "source": source[f]} for f in fields if copy[f] != source[f]}
+    assert not drift, f"{label}: {drift}"
+
+
+def set_tags(db_session, task_id: int, tag_ids: list[int]) -> None:
+    task = db_session.get(Task, task_id)
+    task.tags[:] = [db_session.get(Tag, tag_id) for tag_id in tag_ids]
+
+
+# ---------------------------------------------------------------------------
+# 1. Field by field: a copy is the same work on a new day
+# ---------------------------------------------------------------------------
+
+
+def test_carried_copy_reproduces_its_source_field_by_field(client, db_session):
+    """Every field the copy is supposed to inherit, inherited; the source untouched.
+
+    Differentiates points, priority, notes and sort_order on purpose (including
+    the falsy 0/""/None cases, which a truthiness bug would quietly drop) and
+    covers untagged roots, multi-tag roots and untagged subtasks.
+    """
+    db_session.add_all(
+        [Tag(name="alpha", color="#111111"), Tag(name="beta", color="#222222")]
+    )
+    db_session.commit()
+    tag_ids = dict(db_session.execute(select(Tag.name, Tag.id)).all())
+
+    roots_spec = [
+        dict(title="Ship release", points=30, priority=3, notes="why it matters",
+             sort_order=5, tags=["alpha"]),
+        dict(title="Write it up", points=0, priority=0, notes=None,
+             sort_order=0, tags=[]),
+        dict(title="Empty notes, last in the day", points=1000, priority=1, notes="",
+             sort_order=99, tags=["alpha", "beta"]),
+        dict(title="مرحبا 'quoted' ; drop table tasks", points=7, priority=2,
+             notes="line one\nline two", sort_order=13, tags=["beta"]),
+    ]
+    subs_spec = {
+        "Ship release": [
+            dict(title="Deploy", points=5, priority=0, notes=None,
+                 sort_order=1, tags=[]),
+            dict(title="Smoke test", points=7, priority=2, notes="run it twice",
+                 sort_order=2, tags=["beta"]),
+        ],
+        "Empty notes, last in the day": [
+            dict(title="Write the changelog", points=13, priority=3,
+                 notes="in the readme", sort_order=0, tags=["alpha", "beta"]),
+        ],
+    }
+
+    source_ids: dict[str, int] = {}
+    sub_rows: list[tuple[dict, dict]] = []
+    for i, spec in enumerate(roots_spec):
+        # Spread the roots over several past days, so planned_date is not the only
+        # thing being checked.
+        created = client.post("/api/tasks/", json={
+            "title": spec["title"], "planned_date": iso(-(1 + i * 3)),
+            "points": spec["points"], "priority": spec["priority"],
+            "notes": spec["notes"], "sort_order": spec["sort_order"],
+        })
+        assert created.status_code == status.HTTP_201_CREATED, created.text
+        source_ids[spec["title"]] = created.json()["id"]
+
+        for sub_spec in subs_spec.get(spec["title"], []):
+            # No planned_date: the subtask inherits its parent's past day.
+            sub = client.post("/api/tasks/", json={
+                "title": sub_spec["title"], "parent_task_id": created.json()["id"],
+                "points": sub_spec["points"], "priority": sub_spec["priority"],
+                "notes": sub_spec["notes"], "sort_order": sub_spec["sort_order"],
+            })
+            assert sub.status_code == status.HTTP_201_CREATED, sub.text
+            sub_rows.append((sub_spec, sub.json()))
+
+    for spec in roots_spec:
+        set_tags(db_session, source_ids[spec["title"]], [tag_ids[n] for n in spec["tags"]])
+    for sub_spec, sub_json in sub_rows:
+        set_tags(db_session, sub_json["id"], [tag_ids[n] for n in sub_spec["tags"]])
+    db_session.commit()
+
+    before = task_rows(db_session)
+    tags_before = tag_ids_by_task(db_session)
+    every_source = list(source_ids.values()) + [row["id"] for _, row in sub_rows]
+    assert len(every_source) == len(set(every_source))
+
+    response = run(client)
+    assert response.status_code == status.HTTP_200_OK, response.text
+    result = response.json()
+    today = date.fromisoformat(result["date"])
+    assert today == local_date()
+    assert result["tasks_carried"] == len(roots_spec)
+    assert result["subtasks_carried"] == len(sub_rows)
+    assert result["total_carried"] == result["tasks_carried"] + result["subtasks_carried"]
+
+    after = task_rows(db_session)
+    tags_after = tag_ids_by_task(db_session)
+    copies = copies_by_source(db_session)
+
+    # One copy per source, and nothing else was written.
+    assert set(copies) == set(every_source), "every source must be carried exactly once"
+    assert len(after) == len(before) + result["total_carried"]
+
+    for spec in roots_spec:
+        source = before[source_ids[spec["title"]]]
+        copy = copies[source["id"]]
+
+        assert_fields_equal(copy, source, COPIED_VERBATIM, f"root {spec['title']!r}")
+        assert copy["planned_date"] == today, "a copy is planned for today"
+        assert copy["status"] == "pending"
+        assert copy["carry_count"] == source["carry_count"] + 1
+        assert copy["carried_from_id"] == source["id"]
+        assert copy["id"] != source["id"]
+        assert copy["parent_task_id"] is None
+        # Documented non-copies: this is the same unfinished work, not a new
+        # occurrence, and it did not happen today.
+        assert copy["recurrence_rule"] is None
+        assert copy["completed_at"] is None
+        assert copy["completed_date"] is None
+        assert copy["deleted_at"] is None
+        assert copy["miss_reason"] is None
+        assert copy["created_at"] >= source["created_at"]
+        assert tags_after[copy["id"]] == tags_before[source["id"]]
+
+    for sub_spec, sub_json in sub_rows:
+        source = before[sub_json["id"]]
+        copy = copies[source["id"]]
+        parent_source = before[source["parent_task_id"]]
+        parent_copy = copies[parent_source["id"]]
+
+        assert_fields_equal(copy, source, COPIED_VERBATIM, f"subtask {sub_spec['title']!r}")
+        assert copy["planned_date"] == today
+        assert copy["status"] == "pending"
+        assert copy["carry_count"] == source["carry_count"] + 1
+        assert copy["carried_from_id"] == source["id"]
+        assert copy["id"] != source["id"]
+        assert copy["recurrence_rule"] is None
+        assert copy["created_at"] >= source["created_at"]
+        # The copy hangs under the *copy* of its parent, never under the original.
+        assert copy["parent_task_id"] == parent_copy["id"]
+        assert copy["parent_task_id"] != parent_source["id"]
+        assert parent_copy["id"] != parent_source["id"]
+        assert tags_after[copy["id"]] == tags_before[source["id"]]
+
+    # Sources become "missed" and stay otherwise identical, tags included.
+    for source_id in every_source:
+        assert after[source_id]["status"] == "missed", f"source {source_id} not missed"
+        assert_fields_equal(after[source_id], before[source_id],
+                            SOURCE_UNCHANGED, f"source {source_id}")
+        assert tags_after[source_id] == tags_before[source_id]
+
+
+# ---------------------------------------------------------------------------
+# 2/3. A backlog larger than the 400-id slice boundary
+# ---------------------------------------------------------------------------
+
+# Carry-over slices its set-based reads and writes at 400 ids to stay inside
+# SQLite's bound-parameter cap (app/routers/carry_over.py: _SLICE), so a backlog
+# below 400 would never exercise the second slice.
+LARGE_BACKLOG_ROOTS = 450
+LARGE_BACKLOG_SLICE = 400
+
+# A backlog this size must still cost a fixed handful of statements. Measured: 11
+# for the 750 sources below -- overdue read + 2 selectin loads (subtasks, tags, for
+# roots and subtasks) + 2 sliced copy reads + 2 batched inserts + 1 tag insert +
+# 2 sliced updates. The bound adds four statements of margin, and still sits below
+# what one query per source would cost by two orders of magnitude.
+LARGE_BACKLOG_MAX_STATEMENTS = 15
+
+
+class Backlog(NamedTuple):
+    root_ids: list[int]
+    subtask_ids: list[int]
+    subtask_parents: dict[int, int]
+    tagged: dict[int, list[int]]
+
+    @property
+    def source_ids(self) -> list[int]:
+        return self.root_ids + self.subtask_ids
+
+    @property
+    def total(self) -> int:
+        return len(self.root_ids) + len(self.subtask_ids)
+
+
+def seed_backlog(
+    db_session,
+    roots: int = LARGE_BACKLOG_ROOTS,
+    subs_per_third_root: int = 2,
+) -> Backlog:
+    """An overdue backlog with subtasks and tags, seeded in a handful of statements.
+
+    Built with bulk inserts rather than the API so the fixture does not cost
+    thousands of round-trips; the carry-over run under test still goes through
+    HTTP.
+    """
+    tag_ids = [
+        tag_id
+        for (tag_id,) in db_session.execute(select(Tag.id).order_by(Tag.name)).all()
+    ]
+    planned, original = local_date() - timedelta(days=2), local_date() - timedelta(days=9)
+    created = utcnow()
+
+    root_rows = [
+        dict(
+            title=f"Backlog {i}", notes=None if i % 3 == 0 else f"note {i}",
+            points=i % 101, priority=i % 4, sort_order=i, planned_date=planned,
+            original_date=original, status="pending", carry_count=i % 3,
+            created_at=created,
+        )
+        for i in range(roots)
+    ]
+    root_ids = list(
+        db_session.execute(insert(Task.__table__).returning(Task.__table__.c.id), root_rows)
+        .scalars()
+        .all()
+    )
+
+    sub_rows = []
+    for i in range(0, roots, 3):
+        for s in range(subs_per_third_root):
+            sub_rows.append(dict(
+                title=f"Backlog {i} step {s}", notes=f"sub note {i}-{s}",
+                points=s * 3, priority=s % 4, sort_order=s,
+                parent_task_id=root_ids[i], planned_date=planned,
+                original_date=original, status="pending", carry_count=0,
+                created_at=created,
+            ))
+    sub_ids = list(
+        db_session.execute(insert(Task.__table__).returning(Task.__table__.c.id), sub_rows)
+        .scalars()
+        .all()
+    )
+    subtask_parents = {
+        sub_id: row["parent_task_id"] for sub_id, row in zip(sub_ids, sub_rows)
+    }
+
+    tagged: dict[int, list[int]] = {}
+    links = []
+    for i, root_id in enumerate(root_ids):
+        if i % 2 == 0:
+            tagged[root_id] = [tag_ids[i % len(tag_ids)]]
+            links.append(dict(task_id=root_id, tag_id=tag_ids[i % len(tag_ids)]))
+    for j, sub_id in enumerate(sub_ids):
+        if j % 5 == 0:
+            tagged[sub_id] = [tag_ids[j % len(tag_ids)]]
+            links.append(dict(task_id=sub_id, tag_id=tag_ids[j % len(tag_ids)]))
+    if links:
+        db_session.execute(insert(TaskTag.__table__), links)
+    db_session.commit()
+
+    return Backlog(
+        root_ids=root_ids,
+        subtask_ids=sub_ids,
+        subtask_parents=subtask_parents,
+        tagged=tagged,
+    )
+
+
+def test_large_backlog_is_carried_in_full_within_a_constant_statement_count(client, db_session):
+    """More roots than the 400-id slice, so the sliced reads and writes must hold up.
+
+    Checks the copies are complete and correctly wired, that no source is left
+    pending, and that the statement count stays flat now that the reads and writes
+    are sliced rather than repeated per row.
+    """
+    db_session.add_all([Tag(name="work"), Tag(name="home")])
+    db_session.commit()
+    backlog = seed_backlog(db_session)
+    assert len(backlog.source_ids) > LARGE_BACKLOG_SLICE, "the slice boundary must be crossed"
+
+    with count_statements(db_session.get_bind()) as statements:
+        response = run(client)
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    result = response.json()
+    assert result["tasks_carried"] == len(backlog.root_ids)
+    assert result["subtasks_carried"] == len(backlog.subtask_ids)
+    assert result["total_carried"] == backlog.total
+
+    rows = task_rows(db_session)
+    copies = copies_by_source(db_session)
+    assert set(copies) == set(backlog.source_ids), "every source must be carried exactly once"
+    assert len(rows) == len(backlog.source_ids) + backlog.total
+
+    tags_after = tag_ids_by_task(db_session)
+    for sub_id, parent_source_id in backlog.subtask_parents.items():
+        parent_copy = copies[parent_source_id]
+        assert copies[sub_id]["parent_task_id"] == parent_copy["id"]
+    for task_id, expected in backlog.tagged.items():
+        copy = copies[task_id]
+        assert tags_after[copy["id"]] == expected == tags_after[task_id]
+
+    # No overdue root is left pending anywhere.
+    assert all(rows[source_id]["status"] == "missed" for source_id in backlog.source_ids)
+    still_overdue = db_session.execute(
+        select(func.count())
+        .select_from(Task.__table__)
+        .where(
+            Task.__table__.c.status == "pending",
+            Task.__table__.c.parent_task_id.is_(None),
+            Task.__table__.c.planned_date < date.fromisoformat(result["date"]),
+        )
+    ).scalar_one()
+    assert still_overdue == 0
+
+    assert len(statements) <= LARGE_BACKLOG_MAX_STATEMENTS, (
+        f"{len(statements)} statements for {backlog.total} copies:\n"
+        + "\n".join(f"  {s.splitlines()[0][:90]}" for s in statements)
+    )
+
+
+def test_second_carry_over_over_a_large_backlog_creates_and_changes_nothing(client, db_session):
+    """Idempotency has to survive the bulk path, not just the small one."""
+    db_session.add_all([Tag(name="work"), Tag(name="home")])
+    db_session.commit()
+    backlog = seed_backlog(db_session)
+
+    first = run(client)
+    assert first.status_code == status.HTTP_200_OK, first.text
+    assert first.json()["total_carried"] == backlog.total
+
+    before = task_rows(db_session)
+    before_tags = tag_ids_by_task(db_session)
+
+    second = run(client)
+    assert second.status_code == status.HTTP_200_OK, second.text
+    assert second.json()["date"] == first.json()["date"]
+    assert second.json()["tasks_carried"] == 0
+    assert second.json()["subtasks_carried"] == 0
+    assert second.json()["total_carried"] == 0
+
+    assert task_rows(db_session) == before, "the second run must change no column"
+    assert tag_ids_by_task(db_session) == before_tags, "the second run must add no tag links"
+    assert set(copies_by_source(db_session)) == set(backlog.source_ids)
+
+
+# ---------------------------------------------------------------------------
+# 4. The unique carried_from_id conflict, for real
+# ---------------------------------------------------------------------------
+
+
+def test_conflict_on_carried_from_id_is_retried_without_duplicates(monkeypatch):
+    """A concurrent writer winning the race must cost a retry, not a 500.
+
+    The race is the real one: carry-over reads which sources already have a copy,
+    then writes the whole batch in a single statement, so a copy that appears in
+    between becomes a unique-index violation. The competing copy is committed here,
+    before the request, and the first read is hooked to miss it -- exactly what the
+    endpoint would have seen had the competitor committed a moment after that read.
+    It survives the rollback the retry performs, so the retry finds a copy already
+    there and must carry the rest without duplicating it.
+
+    This test brings its own session rather than the shared `client`/`db_session`
+    fixtures, because the endpoint calls `session.rollback()` on its way into the
+    retry. Against the fixture that rollback unwinds the fixture's still-uncommitted
+    transaction and deletes the rows the test just created; a session that commits
+    for real keeps the rollback scoped to the batch that failed, as in production.
+
+    TestClient re-raises unhandled server errors, so a broken retry fails this test
+    by raising IntegrityError instead of by asserting on a 500.
+    """
+    from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from sqlalchemy.pool import StaticPool
+
+    from app.db import get_db
+    from app.main import app
+    from app.models import Base
+    from app.routers import carry_over
+
+    engine = create_engine("sqlite://", poolclass=StaticPool,
+                           connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    db = Session(engine)
+    app.dependency_overrides[get_db] = lambda: db
+    client = TestClient(app)
+
+    try:
+        db.add(Tag(name="work"))
+        db.commit()
+
+        loser = client.post(
+            "/api/tasks/", json={"title": "Loser of the race", "planned_date": iso(-1),
+                                 "points": 11, "notes": "note", "sort_order": 1}
+        ).json()
+        winner = client.post(
+            "/api/tasks/", json={"title": "Winner of the retry", "planned_date": iso(-2),
+                                 "points": 22, "priority": 2, "sort_order": 2}
+        ).json()
+        winner_sub = client.post(
+            "/api/tasks/", json={"title": "Sub of the winner",
+                                 "parent_task_id": winner["id"], "points": 3}
+        ).json()
+        set_tags(db, loser["id"], [db.execute(select(Tag.id)).scalar_one()])
+        set_tags(db, winner["id"], [db.execute(select(Tag.id)).scalar_one()])
+        db.commit()
+
+        # The concurrent writer, committed before the run and untouched by its rollback.
+        raced_id = loser["id"]
+        db.add(Task(title="Concurrent copy", status="pending",
+                    planned_date=local_date(), carried_from_id=raced_id))
+        db.commit()
+
+        reads: list[list[int]] = []
+        real_read = carry_over._copied_source_ids
+
+        def read_missing_the_race(db, source_ids):
+            """The first read misses the competing copy; the retry's read does not."""
+            copies = real_read(db, source_ids)
+            reads.append(sorted(source_ids))
+            if len(reads) == 1:
+                copies.discard(raced_id)
+            return copies
+
+        monkeypatch.setattr(carry_over, "_copied_source_ids", read_missing_the_race)
+
+        response = run(client)
+        assert response.status_code == status.HTTP_200_OK, response.text
+        assert len(reads) == 2, (
+            "the conflict should have forced exactly one retry that re-read the sources"
+        )
+
+        result = response.json()
+        assert result["tasks_carried"] == 1, "only the task that did not lose the race is carried"
+        assert result["subtasks_carried"] == 1
+        assert result["total_carried"] == 2
+
+        rows = task_rows(db)
+        copies = copies_by_source(db)
+        assert set(copies) == {raced_id, winner["id"], winner_sub["id"]}
+        assert copies[raced_id]["title"] == "Concurrent copy", "the winner keeps its row"
+        assert rows[raced_id]["status"] == "missed"
+        assert rows[winner["id"]]["status"] == "missed"
+        assert rows[winner_sub["id"]]["status"] == "missed"
+
+        winner_copy = copies[winner["id"]]
+        assert winner_copy["title"] == "Winner of the retry"
+        assert winner_copy["planned_date"] == date.fromisoformat(result["date"])
+        assert winner_copy["status"] == "pending"
+        assert winner_copy["carry_count"] == rows[winner["id"]]["carry_count"] + 1
+        assert copies[winner_sub["id"]]["parent_task_id"] == winner_copy["id"]
+        # The retry carried the winner's tags, and left the competitor's row
+        # untouched: a row carry-over never wrote carries no tags of its own.
+        tags = tag_ids_by_task(db)
+        only_tag = db.execute(select(Tag.id)).scalar_one()
+        assert tags[raced_id] == tags[winner["id"]] == [only_tag]
+        assert tags[winner_copy["id"]] == [only_tag]
+        assert tags[copies[raced_id]["id"]] == []
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+        engine.dispose()
